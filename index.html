@@ -41,6 +41,14 @@
     #loading p { font-size: 12px; line-height: 1.8; max-width: 420px; }
     #loading.hidden { opacity: 0; pointer-events: none; }
     #status { position: fixed; top: 95px; right: 34px; max-width: 300px; font-size: 11px; background: #f2f5ecee; border-radius: 5px; padding: 10px 14px; display: none; }
+    .night .masthead,.night .conditions {color:#dfebe5;}
+    .night .mark {border-color:#c8dfd780;}
+    .time-control {position:fixed;top:26px;left:50%;transform:translateX(-50%);width:230px;padding:10px 14px;background:#f4f7ede8;border:1px solid #ffffff80;border-radius:9px;backdrop-filter:blur(16px);}
+    .time-control label {display:block;text-align:center;padding:0;font:9px ui-monospace,monospace;letter-spacing:.08em;}
+    #time {width:100%;height:16px;margin:6px 0 0;accent-color:#337e7a;cursor:pointer;}
+    .time-presets {display:flex;justify-content:space-between;gap:3px;}
+    .time-presets button {font-size:9px;min-height:23px;padding:0 4px;}
+    @media (max-width: 850px) {.time-control {top:109px;width:215px;}}
     @media (max-width: 650px) {
       .masthead { top: 20px; left: 20px; } h1 { font-size: 20px; }
       .conditions { right: 20px; top: 82px; } .conditions .weather { display: none; }
@@ -64,7 +72,12 @@
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 22h20l-5 5H11zM11 7v12m10-12v12M8 11h16M16 4v18"/></svg></div>
     <div><div class="eyebrow">Halvard · North Terminal</div><h1>Aurora Strait</h1></div>
   </header>
-  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 04</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 05</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <section class="time-control" aria-label="Time of day">
+    <label for="time" id="time-label">12:00 · DAYLIGHT</label>
+    <input id="time" type="range" min="5" max="23" step="0.05" value="12" aria-label="Time of day">
+    <div class="time-presets"><button data-hour="6">Dawn</button><button data-hour="12">Midday</button><button data-hour="18">Sunset</button><button data-hour="22">Night</button></div>
+  </section>
   <div id="status" role="status" aria-live="polite"></div>
   <footer class="bottom">
     <div class="caption"><strong>Halvard. The working waterfront.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
@@ -227,9 +240,9 @@
       const environmentScene = new THREE.Scene();
       const environmentSky = sky.clone(); environmentScene.add(environmentSky);
       const pmrem = new THREE.PMREMGenerator(renderer);
-      const environment = pmrem.fromScene(environmentScene, .04, .1, 20000);
+      let environment = pmrem.fromScene(environmentScene, .04, .1, 20000);
       scene.environment=environment.texture; scene.environmentIntensity=.65;
-      pmrem.dispose();
+      // Reuse PMREM for debounced time-of-day environment updates.
       const sun = new THREE.DirectionalLight(0xfff3d9, 3.1);
       sun.position.copy(sunDirection).multiplyScalar(750);
       sun.target.position.set(100,0,0);
@@ -747,7 +760,7 @@
         for(const dx of [-2.5,-1,1,2.5])lightHeads.push({p:[x+dx,32.8,z+.4],s:[.9,.65,.6],r:[-.5,0,0]});
       }
       instances(cylinders,roofMetal,towerPoles);instances(unitBox,roofMetal,lightArms);
-      instances(unitBox,new THREE.MeshStandardMaterial({color:0xe8e3cb,roughness:.4}),lightHeads);
+      const floodLightHeads=instances(unitBox,new THREE.MeshStandardMaterial({color:0xe8e3cb,roughness:.4}),lightHeads);
 
       const breakwaterRocks=[];
       for(let z=-450;z<=190;z+=8)for(let row=-1;row<=1;row++)breakwaterRocks.push({p:[-220+row*5+random()*3,-.4+random()*1.6,z+random()*4],s:[4+random()*3,3+random()*2,5+random()*3],r:[random(),random(),random()]});
@@ -904,6 +917,7 @@
       let simulationTime=0,lastShadowUpdate=-1;
       function updateSimulation(dt){
         simulationTime+=dt;updateLoading(simulationTime);updateBoats(simulationTime);
+        lighthouseBeam.rotation.y=simulationTime*.24;
         if(simulationTime-lastShadowUpdate>(quality==='high'?.12:.3)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
       }
 
@@ -931,7 +945,113 @@
       }
       let savedQuality;try{savedQuality=localStorage.getItem('aurora-quality');}catch{}
       setQuality(savedQuality==='low'?'low':'high');
-      qualitySelect.addEventListener('change',()=>setQuality(qualitySelect.value));
+      // Phase 5 — continuous solar time. No external sky, star or lighting textures.
+      let timeOfDay=12,nightAmount=0,environmentTimer;
+      const hemisphere=scene.children.find(o=>o.isHemisphereLight);
+      const moonFill=new THREE.DirectionalLight(0x8faed4,0);moonFill.position.set(-300,500,200);scene.add(moonFill);
+      sky.material.uniforms.nightBlend={value:0};
+      sky.material.fragmentShader='uniform float nightBlend;\n'+sky.material.fragmentShader;
+      sky.material.fragmentShader=sky.material.fragmentShader.replace('#include <tonemapping_fragment>',`
+        float horizon = pow(1.0-max(normalize(vWorldPosition).y,0.0),3.0);
+        gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.003,.006,.016)+vec3(.009,.013,.024)*horizon,nightBlend);
+        #include <tonemapping_fragment>`);
+      sky.material.needsUpdate=true;
+      const starPositions=[];
+      for(let i=0;i<600;i++){
+        const a=random()*Math.PI*2,y=.12+random()*.88,r=Math.sqrt(1-y*y)*6500;
+        starPositions.push(Math.cos(a)*r,y*6500,Math.sin(a)*r);
+      }
+      const starGeometry=new THREE.BufferGeometry();starGeometry.setAttribute('position',new THREE.Float32BufferAttribute(starPositions,3));
+      const starMaterial=new THREE.PointsMaterial({color:0xc2d8ee,size:1.5,sizeAttenuation:false,transparent:true,opacity:0,depthWrite:false,fog:false});
+      const stars=new THREE.Points(starGeometry,starMaterial);scene.add(stars);
+      const lampMaterial=new THREE.MeshStandardMaterial({color:0xe8e3cb,emissive:0xffd5a0,emissiveIntensity:0,roughness:.4});
+      floodLightHeads.material=lampMaterial;
+      const craneLamps=[];
+      for(const z of craneStations)for(const x of [12,40,78,108])craneLamps.push({p:[x,47.5,z+3.8],s:[1.2,.4,.8]});
+      instances(unitBox,lampMaterial,craneLamps,false);
+      const navigationLamps=instances(new THREE.SphereGeometry(1,8,6),lampMaterial,[
+        ...[[-125,280],[-130,75],[-140,-140],[-130,-350],[-70,295],[-65,-355]].map(([x,z])=>({p:[x,5,z],s:[.22,.3,.22]})),
+        {p:[-220,23.5,196],s:[1.2,1.2,1.2]}
+      ],false);
+      // Limit actual dynamic light count; remaining towers use instanced pools and emissive heads.
+      const floodLights=[];
+      for(const [x,z] of [[78,-37],[242,32],[294,204],[78,52.6],[148,-120],[391,-120]]){
+        const light=new THREE.SpotLight(0xffdfb0,0,155,.78,.7,2);
+        light.position.set(x,x===78?47:33,z);light.target.position.set(x===78?34:x-12,3,z+7);light.castShadow=false;
+        scene.add(light,light.target);floodLights.push(light);
+      }
+      const poolTexture=canvasTexture(128,128,(ctx,w,h)=>{
+        const g=ctx.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'#ffe8b8a0');g.addColorStop(.4,'#ffe8b860');g.addColorStop(1,'#ffe8b800');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+      });
+      const poolMaterial=new THREE.MeshBasicMaterial({map:poolTexture,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,polygonOffset:true,polygonOffsetFactor:-4});
+      const lightPools=instances(new THREE.PlaneGeometry(1,1),poolMaterial,towerPoles.map(t=>({p:[t.p[0],3.06,t.p[2]],s:[52,64,1],r:[-Math.PI/2,0,0]})),false);
+      const lighthouseBeam=new THREE.Group();lighthouseBeam.position.set(-220,23.5,196);scene.add(lighthouseBeam);
+      const beamGeometry=new THREE.ConeGeometry(22,230,32,1,true);beamGeometry.translate(0,-115,0);beamGeometry.rotateX(-Math.PI/2);
+      const beamMaterial=new THREE.ShaderMaterial({transparent:true,depthWrite:false,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,
+        uniforms:{strength:{value:0}},vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+        fragmentShader:'uniform float strength;varying vec2 vUv;void main(){gl_FragColor=vec4(1.0,.86,.58,pow(vUv.y,2.0)*.055*strength);}'
+      });
+      lighthouseBeam.add(new THREE.Mesh(beamGeometry,beamMaterial));
+      const beacon=new THREE.SpotLight(0xffe9b0,0,270,.10,.6,1.5);beacon.position.set(0,0,0);beacon.target.position.set(0,-9,230);lighthouseBeam.add(beacon,beacon.target);
+      const dayFog=new THREE.Color(0xb6cdd0),twilightFog=new THREE.Color(0xbc8c83),nightFog=new THREE.Color(0x101e33);
+      const warmSun=new THREE.Color(0xff9c53),whiteSun=new THREE.Color(0xfff3d9);
+      function refreshEnvironment(){
+        const next=pmrem.fromScene(environmentScene,.04,.1,20000);
+        const previous=environment;environment=next;scene.environment=next.texture;previous.dispose();
+      }
+      function updateNightLights(){
+        floodLights.forEach((light,i)=>{light.intensity=nightAmount*(i<3||quality==='high'?15000:0);});
+        beacon.intensity=nightAmount*3200;beamMaterial.uniforms.strength.value=nightAmount;
+        lighthouseBeam.visible=nightAmount>.01;
+      }
+      function setTimeOfDay(hour,save=true){
+        timeOfDay=THREE.MathUtils.clamp(Number(hour),5,23);
+        const altitude=Math.sin((timeOfDay-6)/12*Math.PI)*1.05;
+        const daylight=THREE.MathUtils.smoothstep(altitude,-.12,.23);
+        nightAmount=1-THREE.MathUtils.smoothstep(altitude,-.20,.12);
+        const warmth=1-THREE.MathUtils.smoothstep(altitude,.02,.5);
+        const azimuth=(timeOfDay-12)*Math.PI/12-.68;
+        sunDirection.set(Math.sin(azimuth)*Math.cos(altitude),Math.sin(altitude),-Math.cos(azimuth)*Math.cos(altitude));
+        sky.material.uniforms.sunPosition.value.copy(sunDirection);
+        sky.material.uniforms.nightBlend.value=nightAmount;
+        sky.material.uniforms.turbidity.value=4.8+warmth*2;
+        sky.material.uniforms.rayleigh.value=1.65+warmth*.8;
+        sun.position.copy(sunDirection).multiplyScalar(750).add(sun.target.position);
+        sun.color.copy(whiteSun).lerp(warmSun,warmth);
+        sun.intensity=3.1*daylight*Math.max(.08,Math.sin(altitude));
+        // A cool ambient floor keeps the port explorable after sunset.
+        hemisphere.intensity=THREE.MathUtils.lerp(.5,1.3,daylight);
+        moonFill.intensity=nightAmount*.55;
+        hemisphere.color.set(0xddeff5).lerp(new THREE.Color(0x6689b5),nightAmount);
+        scene.environmentIntensity=THREE.MathUtils.lerp(.32,.65,daylight);
+        scene.fog.color.copy(dayFog).lerp(twilightFog,warmth*.6).lerp(nightFog,nightAmount);
+        scene.fog.density=THREE.MathUtils.lerp(.00029,.0004,nightAmount);
+        renderer.toneMappingExposure=THREE.MathUtils.lerp(1.1,.85,daylight);
+        glass.emissive.set(0xffc578);glass.emissiveIntensity=nightAmount*1.3;
+        lampMaterial.emissiveIntensity=nightAmount*5;
+        poolMaterial.opacity=nightAmount*.45;starMaterial.opacity=nightAmount*.65;
+        bloom.strength=THREE.MathUtils.lerp(.13,.28,nightAmount);
+        for(const sea of Object.values(waters)){
+          sea.material.uniforms.sunDirection.value.copy(sunDirection);
+          sea.material.uniforms.sunColor.value.copy(sun.color).multiplyScalar(daylight);
+          sea.material.uniforms.waterColor.value.set(0x146560).lerp(new THREE.Color(0x06101e),nightAmount);
+        }
+        updateNightLights();renderer.shadowMap.needsUpdate=true;
+        document.body.classList.toggle('night',nightAmount>.5);
+        const minutes=Math.round(timeOfDay*60),label=nightAmount>.8?'NIGHT':timeOfDay<8?'DAWN':timeOfDay>16?'SUNSET':'DAYLIGHT';
+        document.querySelector('#time').value=timeOfDay;
+        document.querySelector('#time-label').textContent=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')} · ${label}`;
+        document.querySelector('#time').setAttribute('aria-valuetext',document.querySelector('#time-label').textContent);
+        document.querySelector('.weather').textContent=label+' / CALM SEA';
+        clearTimeout(environmentTimer);environmentTimer=setTimeout(refreshEnvironment,300);
+        if(save)try{localStorage.setItem('aurora-time',timeOfDay);}catch{}
+      }
+      document.querySelector('#time').addEventListener('input',event=>setTimeOfDay(event.target.value));
+      document.querySelectorAll('[data-hour]').forEach(button=>button.addEventListener('click',()=>setTimeOfDay(button.dataset.hour)));
+      let savedTime=12;try{const value=localStorage.getItem('aurora-time');if(value!==null&&Number.isFinite(Number(value)))savedTime=Number(value);}catch{}
+      setTimeOfDay(savedTime,false);
+
+      qualitySelect.addEventListener('change',()=>{setQuality(qualitySelect.value);updateNightLights();});
       document.querySelector('#reset').addEventListener('click',resetView);
       document.querySelector('#fullscreen').addEventListener('click',async()=>{
         try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}
@@ -942,9 +1062,9 @@
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();renderer.setAnimationLoop(null);fail(new Error('WebGL context lost'));});
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
-      const metrics={phase:4,quality,frames:0,drawCalls:0,triangles:0};
+      const metrics={phase:5,quality,frames:0,drawCalls:0,triangles:0};
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
       renderer.setAnimationLoop(()=>{
         const dt=Math.min(clock.getDelta(),.05);
         if(document.hidden)return;
