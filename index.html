@@ -64,10 +64,10 @@
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 22h20l-5 5H11zM11 7v12m10-12v12M8 11h16M16 4v18"/></svg></div>
     <div><div class="eyebrow">Halvard · North Terminal</div><h1>Aurora Strait</h1></div>
   </header>
-  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 03</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 04</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
   <div id="status" role="status" aria-live="polite"></div>
   <footer class="bottom">
-    <div class="caption"><strong>Halvard. A harbour taking shape.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
+    <div class="caption"><strong>Halvard. The working waterfront.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
     <nav class="toolbar" aria-label="Scene controls">
       <span class="orbit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2"/></svg>Orbit</span>
       <div class="divider"></div>
@@ -502,8 +502,8 @@
           const base=containerBatches[i],near=containerDetailBatches[i];let count=0;
           slots.forEach((slot,j)=>{
             slotPosition.set(...slot.p).applyMatrix4(ship.matrixWorld);
-            const detailed=high&&slotPosition.distanceToSquared(camera.position)<75*75;
-            base.setMatrixAt(j,detailed?hiddenMatrix:slot.matrix);
+            const detailed=!slot.inTransit&&high&&slotPosition.distanceToSquared(camera.position)<75*75;
+            base.setMatrixAt(j,(slot.inTransit||detailed)?hiddenMatrix:slot.matrix);
             if(detailed){near.setMatrixAt(count,slot.matrix);near.setColorAt(count,slot.tint);count++;}
           });
           base.instanceMatrix.needsUpdate=true;near.count=count;near.visible=count>0;
@@ -633,7 +633,7 @@
       const cranePaint=new THREE.MeshStandardMaterial({color:0x2c8587,metalness:.48,roughness:.6});
       const orange=new THREE.MeshStandardMaterial({color:0xd8a139,metalness:.35,roughness:.65});
       const craneSteel=[],craneBraces=[],craneWheels=[],craneGlass=[],craneCables=[],spreaders=[];
-      const craneStations=[-88,-40,8,56,104];
+      const craneStations=[-88.2,-37,1.4,52.6,103.8];
       for(const z of craneStations){
         // Two rail bogies per portal; a clear truck lane beneath the gantry.
         for(const x of [75,96])for(const dz of [-9,9]){
@@ -652,15 +652,13 @@
           craneBraces.push(rod([79,44,z+dz],[83,68,z+dz],.5));
           craneCables.push(rod([83,67,z+dz],[3,52,z+dz],.075),rod([83,67,z+dz],[111,52,z+dz],.075));
         }
-        craneSteel.push({p:[83,68,z],s:[2,1,9]},{p:[39,47,z],s:[5,1.2,8]});
+        craneSteel.push({p:[83,68,z],s:[2,1,9]});
         craneSteel.push({p:[45,44.5,z+5],s:[4,3.5,3.2]});
         craneGlass.push({p:[45,45,z+6.64],s:[3.4,1.9,.1]},{p:[42.94,45,z+5],s:[.1,1.9,2.8]});
-        for(const x of [37,41])for(const dz of [-4.7,4.7])craneCables.push(rod([x,46,z+dz],[x,35,z+dz],.055));
-        spreaders.push({p:[39,34.8,z],s:[3.2,.65,12.1]});
       }
       instances(unitBox,cranePaint,craneSteel);instances(cylinders,cranePaint,craneBraces);
       instances(cylinders,darkMat,craneWheels);instances(unitBox,glass,craneGlass,false);
-      instances(cylinders,steel,craneCables,false);instances(unitBox,orange,spreaders);
+      instances(cylinders,steel,craneCables,false);
 
       const yardManifest=lines.map(()=>[]);let yardContainerCount=0;
       for(const x of [157,180,203])for(let bay=0;bay<18;bay++)for(let row=0;row<5;row++){
@@ -682,14 +680,6 @@
         yardFrames.push({p:[x,18.5,z],s:[4,1.5,11]});
         yardWindows.push({p:[x+8,17.5,z+6],s:[2.5,2.3,2]});
         for(const dx of [-1.5,1.5])yardBeams.push(rod([x+dx,18,z],[x+dx,14,z],.05));
-      }
-      // Parked straddle carriers; their paths and movement arrive in phase 4.
-      for(const [x,z] of [[137,-202],[138,42],[226,-90]]){
-        for(const dx of [-2.5,2.5])for(const dz of [-4.7,4.7]){
-          yardFrames.push({p:[x+dx,7.7,z+dz],s:[.45,7.3,.5]});
-          yardTires.push({p:[x+dx,4.1,z+dz],s:[.95,.7,.95],r:[0,0,Math.PI/2]});
-        }
-        yardFrames.push({p:[x,11.5,z],s:[6,1,11]});yardWindows.push({p:[x+2,11,z+4],s:[2,2,2]});
       }
       instances(unitBox,orange,yardFrames);instances(cylinders,darkMat,yardTires);
       instances(cylinders,steel,yardBeams);instances(unitBox,glass,yardWindows);
@@ -779,6 +769,144 @@
       instances(new THREE.ConeGeometry(1,1,12),tealSteel,[{p:[-70,.5,295],s:[2.2,1.4,2.2]},{p:[-65,.5,-355],s:[2.2,1.4,2.2]}]);
       instances(cylinders,tealSteel,[{p:[-70,3,295],s:[.35,4,.35]},{p:[-65,3,-355],s:[.35,4,.35]}]);
 
+      // Phase 4 — deterministic simulation: one clock drives ownership, hoists and traffic.
+      const cycleDuration=76,craneBays=[1,5,8,12,16];
+      const craneLoads=craneBays.map((bay,i)=>{
+        const slot=containerSlots.filter(s=>s.bay===bay&&s.row===8).sort((a,b)=>b.tier-a.tier)[0];
+        const mesh=instances(containerCoarse,containerBatches[slot.line].material,[{p:[0,0,0]}]);
+        mesh.setColorAt(0,slot.tint);mesh.visible=false;
+        return {slot,mesh,state:'approach',owner:'ship',x:110,y:42,truck:new THREE.Vector3(110,0,slot.p[2]),heading:0};
+      });
+      const hoistTrolleys=instances(unitBox,cranePaint,craneLoads.map(()=>({p:[0,0,0]})));
+      const hoistSpreaders=instances(unitBox,orange,craneLoads.map(()=>({p:[0,0,0]})));
+      const hoistRopes=instances(cylinders,steel,Array.from({length:20},()=>({p:[0,0,0]})),false);
+      function writeInstance(mesh,index,p,s=[1,1,1],r=[0,0,0]){
+        dummy.position.set(...p);dummy.scale.set(...s);dummy.rotation.set(...r);dummy.updateMatrix();mesh.setMatrixAt(index,dummy.matrix);
+      }
+      const truckParts=[
+        {geo:unitBox,mat:steel,parts:[{p:[0,4.4,0],s:[2.7,.5,13.2]},{p:[0,4.5,8],s:[2.6,.5,4]}]},
+        {geo:unitBox,mat:whiteSteel,parts:[{p:[0,5.8,8.4],s:[2.6,2.6,3.2]}]},
+        {geo:unitBox,mat:glass,parts:[{p:[0,6.3,10.03],s:[2.25,1.1,.1]}]},
+        {geo:cylinders,mat:darkMat,parts:[-1.4,1.4].flatMap(x=>[-4.5,-2.8,6.9,9.3].map(z=>({p:[x,3.75,z],s:[.7,.45,.7],r:[0,0,Math.PI/2]})))}
+      ];
+      function dynamicVehicle(definitions,count){
+        return definitions.map(def=>({...def,mesh:instances(def.geo,def.mat,Array.from({length:def.parts.length*count},()=>({p:[0,0,0]})))}));
+      }
+      const trucks=dynamicVehicle(truckParts,5);
+      const vehicleMatrix=new THREE.Matrix4(),partMatrix=new THREE.Matrix4(),vehicleQuaternion=new THREE.Quaternion(),axisY=new THREE.Vector3(0,1,0);
+      function placeVehicle(batches,index,position,heading){
+        vehicleQuaternion.setFromAxisAngle(axisY,heading);vehicleMatrix.compose(position,vehicleQuaternion,new THREE.Vector3(1,1,1));
+        for(const batch of batches)batch.parts.forEach((part,j)=>{
+          dummy.position.set(...part.p);dummy.scale.set(...part.s);dummy.rotation.set(...(part.r||[0,0,0]));dummy.updateMatrix();
+          partMatrix.multiplyMatrices(vehicleMatrix,dummy.matrix);batch.mesh.setMatrixAt(index*batch.parts.length+j,partMatrix);
+        });
+      }
+      function finishVehicles(batches){for(const b of batches){b.mesh.instanceMatrix.needsUpdate=true;b.mesh.computeBoundingSphere();}}
+      const truckPaths=craneLoads.map(load=>{
+        const z=load.slot.p[2];return new THREE.CatmullRomCurve3([[110,z],[110,z+15],[142,z+15],[142,z-15],[110,z-15]].map(([x,z])=>new THREE.Vector3(x,0,z)),true,'centripetal');
+      });
+      const carrierParts=[
+        {geo:unitBox,mat:orange,parts:[{p:[0,11.5,0],s:[6,1,11]},...[-2.5,2.5].flatMap(x=>[-4.7,4.7].map(z=>({p:[x,7.7,z],s:[.45,7.3,.5]})))]},
+        {geo:unitBox,mat:glass,parts:[{p:[2,11,4],s:[2,2,2]}]},
+        {geo:cylinders,mat:darkMat,parts:[-2.5,2.5].flatMap(x=>[-4.7,4.7].map(z=>({p:[x,4.1,z],s:[.95,.7,.95],r:[0,0,Math.PI/2]})))}
+      ];
+      const carriers=dynamicVehicle(carrierParts,3);
+      const carrierPath=new THREE.CatmullRomCurve3([[228,-260],[228,115],[236,132],[252,132],[260,115],[260,-260],[252,-278],[236,-278]].map(([x,z])=>new THREE.Vector3(x,0,z)),true,'centripetal');
+      const cargoPoint=new THREE.Vector3(),truckTangent=new THREE.Vector3();
+      const ease=t=>{t=THREE.MathUtils.clamp(t,0,1);return t*t*(3-2*t);};
+      function blend(a,b,t){return THREE.MathUtils.lerp(a,b,ease(t));}
+      function updateLoading(time){
+        let ownershipChanged=false;
+        ship.position.y=Math.sin(time*.43)*.10;ship.rotation.z=Math.sin(time*.31)*.0008;ship.rotation.x=Math.sin(time*.27)*.0003;ship.updateMatrixWorld(true);
+        craneLoads.forEach((load,i)=>{
+          const t=(time+i*12)%cycleDuration,slot=load.slot,z=slot.p[2];
+          cargoPoint.set(...slot.p).applyMatrix4(ship.matrixWorld);
+          const pickup=cargoPoint.y+1.295+.325,drop=4.7+2.59+.325;
+          let x=110,y=42,state='approach',owner='ship';
+          if(t<6)x=blend(110,cargoPoint.x,t/6);
+          else if(t<14){x=cargoPoint.x;y=blend(42,pickup,(t-6)/8);state='lower to ship';}
+          else if(t<16){x=cargoPoint.x;y=pickup;state='lock';}
+          else if(t<24){x=cargoPoint.x;y=blend(pickup,42,(t-16)/8);state='lift';owner='spreader';}
+          else if(t<35){x=blend(cargoPoint.x,110,(t-24)/11);state='transfer';owner='spreader';}
+          else if(t<44){y=blend(42,drop,(t-35)/9);state='lower to truck';owner='spreader';}
+          else if(t<46){y=drop;state='unlock';owner='truck';}
+          else if(t<53){y=blend(drop,42,(t-46)/7);state='hoist clear';owner='truck';}
+          else {state='truck delivery';owner=t<65?'truck':'yard';}
+          const absent=owner!=='ship';if(slot.inTransit!==absent){slot.inTransit=absent;ownershipChanged=true;}
+          load.x=x;load.y=y;load.state=state;load.owner=owner;
+          const routeTime=t<53?0:(t-53)/23;
+          load.truck.copy(truckPaths[i].getPointAt(routeTime%1));truckTangent.copy(truckPaths[i].getTangentAt(routeTime%1));
+          load.heading=t<53?0:Math.atan2(truckTangent.x,truckTangent.z);
+          placeVehicle(trucks,i,load.truck,load.heading);
+          writeInstance(hoistTrolleys,i,[x,47,z],[5,1.2,8]);writeInstance(hoistSpreaders,i,[x,y,z],[3.2,.65,12.1]);
+          let n=i*4;for(const dx of [-1.2,1.2])for(const dz of [-4.7,4.7])writeInstance(hoistRopes,n++,[x+dx,(46+y+.325)/2,z+dz],[.055,46-y-.325,.055]);
+          load.mesh.visible=owner!=='ship';
+          if(owner==='spreader')writeInstance(load.mesh,0,[x,y-.325-1.295,z]);
+          else if(owner==='truck')writeInstance(load.mesh,0,[load.truck.x,5.995,load.truck.z],[1,1,1],[0,load.heading,0]);
+          else if(owner==='yard')writeInstance(load.mesh,0,[151,4.395,z]);
+          load.mesh.instanceMatrix.needsUpdate=true;load.mesh.computeBoundingSphere();
+        });
+        // The scene is a repeating loading demonstration: delivered cargo resets at cycle end.
+        if(ownershipChanged)lastDetailQuality=undefined;
+        for(const mesh of [hoistTrolleys,hoistSpreaders,hoistRopes]){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}
+        finishVehicles(trucks);
+        for(let i=0;i<3;i++){
+          const u=(time/150+i/3)%1,p=carrierPath.getPointAt(u),d=carrierPath.getTangentAt(u);
+          placeVehicle(carriers,i,p,Math.atan2(d.x,d.z));
+        }
+        finishVehicles(carriers);
+      }
+
+      // Procedural tug and pilot boat, with geometry generated from a simple hull outline.
+      function makeBoat(name,length,beam,paint){
+        const group=new THREE.Group();group.name=name;scene.add(group);
+        const shape=new THREE.Shape();shape.moveTo(-beam/2,-length/2);shape.lineTo(beam/2,-length/2);
+        shape.lineTo(beam/2,length*.22);shape.quadraticCurveTo(beam*.4,length*.43,0,length/2);
+        shape.quadraticCurveTo(-beam*.4,length*.43,-beam/2,length*.22);shape.closePath();
+        const geo=new THREE.ExtrudeGeometry(shape,{depth:1.8,bevelEnabled:true,bevelThickness:.35,bevelSize:.25,bevelSegments:2,steps:1});
+        geo.rotateX(Math.PI/2);geo.translate(0,1.2,0);
+        const hull=new THREE.Mesh(geo,paint);hull.castShadow=true;group.add(hull);
+        box(beam*.7,2.2,length*.34,whiteSteel,0,2.3,0,group);
+        box(beam*.76,.25,length*.39,orange,0,3.55,0,group);
+        instances(unitBox,glass,[{p:[0,2.7,length*.171],s:[beam*.6,1,.1]},{p:[-beam*.355,2.7,0],s:[.1,1,length*.25]},{p:[beam*.355,2.7,0],s:[.1,1,length*.25]}],false,group);
+        instances(cylinders,whiteSteel,[{p:[0,4.4,-1],s:[.09,2,.09]}],true,group);
+        if(name==='Halvard Tug'){
+          box(1,2,1,steel,1,3,-3,group);
+          instances(new THREE.TorusGeometry(.7,.22,6,12),darkMat,[-1,1].flatMap(sign=>[-5,-2,2,4].map(z=>({p:[sign*beam*.52,.65,z],r:[0,Math.PI/2,0]}))),false,group);
+        }
+        return group;
+      }
+      const tug=makeBoat('Halvard Tug',17,6,steel),pilot=makeBoat('Halvard Pilot',12,3.8,orange);
+      const boatRoutes=[{boat:tug,cx:-173,rx:17,cz:-60,rz:230,period:190,offset:0},{boat:pilot,cx:-73,rx:28,cz:-45,rz:245,period:130,offset:1.8}];
+      function boatPose(route,time){const a=time/route.period*Math.PI*2+route.offset;return {x:route.cx+Math.sin(a)*route.rx,z:route.cz+Math.cos(a)*route.rz,heading:Math.atan2(Math.cos(a)*route.rx,-Math.sin(a)*route.rz)};}
+      const foam=canvasTexture(128,128,(ctx,w,h)=>{
+        const g=ctx.createRadialGradient(64,64,5,64,64,63);g.addColorStop(0,'#ffffffc0');g.addColorStop(.45,'#e5f4ed70');g.addColorStop(1,'#e5f4ed00');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+        ctx.globalCompositeOperation='destination-out';for(let i=0;i<300;i++){ctx.fillStyle='#00000060';ctx.fillRect(random()*w,random()*h,2,2);}
+      });
+      const foamMat=new THREE.MeshBasicMaterial({map:foam,transparent:true,depthWrite:false,opacity:.55,polygonOffset:true,polygonOffsetFactor:-1});
+      foamMat.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#ifdef USE_COLOR\n diffuseColor.a *= vColor.r;\n#endif');};
+      const wakes=instances(new THREE.PlaneGeometry(1,1),foamMat,Array.from({length:240},()=>({p:[0,0,0]})),false);
+      const wakeTint=new THREE.Color();for(let i=0;i<240;i++)wakes.setColorAt(i,wakeTint);
+      function updateBoats(time){
+        boatRoutes.forEach((route,b)=>{
+          const p=boatPose(route,time);route.boat.position.set(p.x,Math.sin(time*1.2+b)*.12,p.z);route.boat.rotation.set(Math.sin(time*.8+b)*.015,p.heading,Math.sin(time*1.1+b)*.025);
+          for(let j=0;j<40;j++){
+            const age=(j+.5)*.28,old=boatPose(route,time-age),behind=b===0?9:6.5;
+            for(let side=-1;side<=1;side++){
+              const index=b*120+j*3+side+1,spread=side*(1+age*.6);
+              writeInstance(wakes,index,[old.x-Math.sin(old.heading)*behind+Math.cos(old.heading)*spread,.06+j*.0002,old.z-Math.cos(old.heading)*behind-Math.sin(old.heading)*spread],[1.5+age*.3,3+age*.25,1],[-Math.PI/2,0,-old.heading]);
+              wakes.setColorAt(index,wakeTint.setScalar((1-age/12)*(side===0?.6:1)));
+            }
+          }
+        });
+        wakes.instanceMatrix.needsUpdate=true;wakes.instanceColor.needsUpdate=true;wakes.computeBoundingSphere();
+      }
+      let simulationTime=0,lastShadowUpdate=-1;
+      function updateSimulation(dt){
+        simulationTime+=dt;updateLoading(simulationTime);updateBoats(simulationTime);
+        if(simulationTime-lastShadowUpdate>(quality==='high'?.12:.3)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
+      }
+
       const composer=new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene,camera));
       const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.13,.5,1.25);
@@ -814,12 +942,13 @@
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();renderer.setAnimationLoop(null);fail(new Error('WebGL context lost'));});
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
-      const metrics={phase:3,quality,frames:0,drawCalls:0,triangles:0};
+      const metrics={phase:4,quality,frames:0,drawCalls:0,triangles:0};
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
       renderer.setAnimationLoop(()=>{
         const dt=Math.min(clock.getDelta(),.05);
         if(document.hidden)return;
+        updateSimulation(dt);
         seaTime+=dt*.38;water.material.uniforms.time.value=seaTime;
         controls.update();
         // Keep the camera above sea level and above the quay when zooming close.
