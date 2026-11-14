@@ -64,10 +64,10 @@
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 22h20l-5 5H11zM11 7v12m10-12v12M8 11h16M16 4v18"/></svg></div>
     <div><div class="eyebrow">Halvard · North Terminal</div><h1>Aurora Strait</h1></div>
   </header>
-  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 02</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 03</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
   <div id="status" role="status" aria-live="polite"></div>
   <footer class="bottom">
-    <div class="caption"><strong>Aurora Strait. Alongside at Halvard.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
+    <div class="caption"><strong>Halvard. A harbour taking shape.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
     <nav class="toolbar" aria-label="Scene controls">
       <span class="orbit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2"/></svg>Orbit</span>
       <div class="divider"></div>
@@ -124,9 +124,9 @@
       function resetView() {
         // Drain any orbit inertia before restoring a deterministic home pose.
         controls.enableDamping=false;controls.update();
-        camera.position.set(-250, 130, 295);
-        controls.target.set(35, 14, 0);
-        controls.cursor.set(35, 14, 0);
+        camera.position.set(-440, 265, 565);
+        controls.target.set(100, 15, -20);
+        controls.cursor.set(100, 15, -20);
         controls.update();
         controls.enableDamping=true;
       }
@@ -629,6 +629,156 @@
         {p:[2200,0,-500],s:[430,240,350],r:[0,2,0]}
       ],false);
 
+      // Phase 3 — terminal infrastructure. Repeated steelwork shares instanced batches.
+      const cranePaint=new THREE.MeshStandardMaterial({color:0x2c8587,metalness:.48,roughness:.6});
+      const orange=new THREE.MeshStandardMaterial({color:0xd8a139,metalness:.35,roughness:.65});
+      const craneSteel=[],craneBraces=[],craneWheels=[],craneGlass=[],craneCables=[],spreaders=[];
+      const craneStations=[-88,-40,8,56,104];
+      for(const z of craneStations){
+        // Two rail bogies per portal; a clear truck lane beneath the gantry.
+        for(const x of [75,96])for(const dz of [-9,9]){
+          craneSteel.push({p:[x,4.7,z+dz],s:[3,2.4,7]});
+          craneBraces.push(rod([x,5,z+dz],[x+(x===75?2:-2),43,z+dz*.65],.75));
+          for(const d of [-2,2])craneWheels.push({p:[x,3.9,z+dz+d],s:[.75,2,.75],r:[0,0,Math.PI/2]});
+        }
+        craneSteel.push({p:[85.5,26,z],s:[24,2,3]},{p:[85.5,44,z],s:[27,3,15]});
+        // Twin lattice boom trusses extend over every ship row.
+        for(const dz of [-3.6,3.6]){
+          for(const y of [48,52])craneSteel.push({p:[56,y,z+dz],s:[113,.55,.55]});
+          for(let x=0;x<112;x+=7){
+            craneBraces.push(rod([x,48,z+dz],[x+7,52,z+dz],.16));
+            craneBraces.push(rod([x,52,z+dz],[x+7,48,z+dz],.16));
+          }
+          craneBraces.push(rod([79,44,z+dz],[83,68,z+dz],.5));
+          craneCables.push(rod([83,67,z+dz],[3,52,z+dz],.075),rod([83,67,z+dz],[111,52,z+dz],.075));
+        }
+        craneSteel.push({p:[83,68,z],s:[2,1,9]},{p:[39,47,z],s:[5,1.2,8]});
+        craneSteel.push({p:[45,44.5,z+5],s:[4,3.5,3.2]});
+        craneGlass.push({p:[45,45,z+6.64],s:[3.4,1.9,.1]},{p:[42.94,45,z+5],s:[.1,1.9,2.8]});
+        for(const x of [37,41])for(const dz of [-4.7,4.7])craneCables.push(rod([x,46,z+dz],[x,35,z+dz],.055));
+        spreaders.push({p:[39,34.8,z],s:[3.2,.65,12.1]});
+      }
+      instances(unitBox,cranePaint,craneSteel);instances(cylinders,cranePaint,craneBraces);
+      instances(cylinders,darkMat,craneWheels);instances(unitBox,glass,craneGlass,false);
+      instances(cylinders,steel,craneCables,false);instances(unitBox,orange,spreaders);
+
+      const yardManifest=lines.map(()=>[]);let yardContainerCount=0;
+      for(const x of [157,180,203])for(let bay=0;bay<18;bay++)for(let row=0;row<5;row++){
+        const tiers=2+(bay+row)%3;
+        for(let tier=0;tier<tiers;tier++){
+          const line=(bay+row*3+tier)%6;
+          yardManifest[line].push({p:[x+row*2.54,4.4+tier*2.68,-240+bay*12.8]});yardContainerCount++;
+        }
+      }
+      yardManifest.forEach((ts,i)=>instances(containerCoarse,containerBatches[i].material,ts));
+      const yardFrames=[],yardTires=[],yardBeams=[],yardWindows=[];
+      // Rubber-tyred gantries span a five-wide stack plus a transfer lane.
+      for(const [x,z] of [[164,-167],[187,-64],[210,-210]]){
+        for(const dx of [-10,10])for(const dz of [-5,5]){
+          yardFrames.push({p:[x+dx,11,z+dz],s:[.85,15,.85]});
+          yardTires.push({p:[x+dx,4.4,z+dz],s:[1.1,1.4,1.1],r:[0,0,Math.PI/2]});
+        }
+        for(const dz of [-5,5])yardFrames.push({p:[x,19,z+dz],s:[23,1.7,1.2]});
+        yardFrames.push({p:[x,18.5,z],s:[4,1.5,11]});
+        yardWindows.push({p:[x+8,17.5,z+6],s:[2.5,2.3,2]});
+        for(const dx of [-1.5,1.5])yardBeams.push(rod([x+dx,18,z],[x+dx,14,z],.05));
+      }
+      // Parked straddle carriers; their paths and movement arrive in phase 4.
+      for(const [x,z] of [[137,-202],[138,42],[226,-90]]){
+        for(const dx of [-2.5,2.5])for(const dz of [-4.7,4.7]){
+          yardFrames.push({p:[x+dx,7.7,z+dz],s:[.45,7.3,.5]});
+          yardTires.push({p:[x+dx,4.1,z+dz],s:[.95,.7,.95],r:[0,0,Math.PI/2]});
+        }
+        yardFrames.push({p:[x,11.5,z],s:[6,1,11]});yardWindows.push({p:[x+2,11,z+4],s:[2,2,2]});
+      }
+      instances(unitBox,orange,yardFrames);instances(cylinders,darkMat,yardTires);
+      instances(cylinders,steel,yardBeams);instances(unitBox,glass,yardWindows);
+
+      // Inland apron connects the berth to office, warehouses and electrical compound.
+      box(160,4.8,600,concreteMat,320,.5,0);
+      const buildingWall=new THREE.MeshStandardMaterial({color:0xcac7b5,roughness:.9});
+      const roofMetal=new THREE.MeshStandardMaterial({color:0x657779,metalness:.45,roughness:.75});
+      const buildingWindows=[],warehouseDoors=[],roofRibs=[];
+      box(42,15,28,buildingWall,294,10.5,204);box(44,.7,30,roofMetal,294,18.3,204);
+      for(const y of [6.5,10.5,14.5])for(let x=277;x<=311;x+=5)for(const z of [189.94,218.06])buildingWindows.push({p:[x,y,z],s:[3,2.3,.12]});
+      for(const z of [-190,-92,6]){
+        box(95,13,66,buildingWall,332,9.5,z);
+        box(98,.7,69,roofMetal,332,16.3,z);
+        for(let dz=-26;dz<=26;dz+=13)warehouseDoors.push({p:[284.43,7,z+dz],s:[.15,7,8]});
+        for(let x=285;x<382;x+=3)roofRibs.push({p:[x,16.8,z],s:[.12,.35,68]});
+      }
+      instances(unitBox,glass,buildingWindows,false);instances(unitBox,roofMetal,warehouseDoors);instances(unitBox,roofMetal,roofRibs);
+      function groundSign(text,w,h,x,y,z,rotation=0){
+        const map=lettering(text,'HALVARD PORT AUTHORITY',1024,256);
+        const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map,transparent:true,depthWrite:false}));
+        m.position.set(x,y,z);m.rotation.y=rotation;scene.add(m);
+      }
+      groundSign('PORT OPERATIONS',30,4,294,16,218.13);
+      // Brick 11 kV hut, transformer equipment, chain-link enclosure and warning signs.
+      const brick=canvasTexture(512,256,(ctx,w,h)=>{
+        ctx.fillStyle='#c0ad92';ctx.fillRect(0,0,w,h);
+        for(let row=0;row<8;row++)for(let col=-1;col<9;col++){
+          ctx.fillStyle=`hsl(16 28% ${38+random()*12}%)`;ctx.fillRect(col*64+(row%2)*32+2,row*32+2,60,28);
+        }
+      });brick.repeat.set(3,2);
+      box(15,7,13,new THREE.MeshStandardMaterial({map:brick,roughness:1}),333,6.5,128);
+      box(16,.6,14,roofMetal,333,10.3,128);
+      box(3.3,4.8,.15,roofMetal,333,5.5,134.6);
+      box(9,4.6,7,roofMetal,354,5.4,128);
+      const fins=[],insulators=[];
+      for(let x=350;x<=358;x+=.5)fins.push({p:[x,5.5,132],s:[.15,3.8,1.3]});
+      for(const x of [351,354,357])insulators.push({p:[x,8.5,128],s:[.3,2,.3]});
+      instances(unitBox,roofMetal,fins);instances(cylinders,whiteSteel,insulators);
+      const fencePosts=[],fenceWire=[];
+      const fenceCorners=[[318,114],[366,114],[366,144],[318,144]];
+      for(let side=0;side<4;side++){
+        const a=fenceCorners[side],b=fenceCorners[(side+1)%4],length=Math.hypot(b[0]-a[0],b[1]-a[1]);
+        for(let d=0;d<=length;d+=3){const t=d/length;fencePosts.push({p:[a[0]+(b[0]-a[0])*t,4.65,a[1]+(b[1]-a[1])*t],s:[.065,3.4,.065]});}
+        for(const y of [3.3,6.1])fenceWire.push(rod([a[0],y,a[1]],[b[0],y,b[1]],.035));
+        // Diagonal wires clipped to the fence's rectangular span, instanced for all panels.
+        for(let d=-3;d<length;d+=.45)for(const sign of [-1,1]){
+          const lo=Math.max(0,d),hi=Math.min(length,d+2.8);if(hi<=lo)continue;
+          const point=u=>[a[0]+(b[0]-a[0])*u/length,sign>0?3.3+(u-d):6.1-(u-d),a[1]+(b[1]-a[1])*u/length];
+          fenceWire.push(rod(point(lo),point(hi),.012));
+        }
+      }
+      instances(cylinders,roofMetal,fencePosts);instances(cylinders,roofMetal,fenceWire,false);
+      const warning=canvasTexture(512,256,(ctx,w,h)=>{
+        ctx.fillStyle='#e5c64e';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#252923';ctx.lineWidth=9;ctx.strokeRect(8,8,w-16,h-16);
+        ctx.fillStyle='#252923';ctx.font='bold 52px sans-serif';ctx.textAlign='center';ctx.fillText('11 kV',w/2,80);
+        ctx.font='bold 28px sans-serif';ctx.fillText('DANGER · HIGH VOLTAGE',w/2,140);ctx.font='20px sans-serif';ctx.fillText('AUTHORISED PERSONNEL ONLY',w/2,195);
+      });
+      instances(new THREE.PlaneGeometry(3.8,1.9),new THREE.MeshStandardMaterial({map:warning}),[{p:[333,6.9,134.72]},{p:[326,5,144.1]},{p:[317.9,5,128],r:[0,-Math.PI/2,0]}],false);
+
+      // Instanced light towers and floodlight heads; illumination is added in phase 5.
+      const towerPoles=[],lightHeads=[],lightArms=[];
+      for(const x of [148,242,391])for(const z of [-264,-120,32,260]){
+        towerPoles.push({p:[x,18,z],s:[.22,30,.22]});lightArms.push({p:[x,33,z],s:[6,.3,.4]});
+        for(const dx of [-2.5,-1,1,2.5])lightHeads.push({p:[x+dx,32.8,z+.4],s:[.9,.65,.6],r:[-.5,0,0]});
+      }
+      instances(cylinders,roofMetal,towerPoles);instances(unitBox,roofMetal,lightArms);
+      instances(unitBox,new THREE.MeshStandardMaterial({color:0xe8e3cb,roughness:.4}),lightHeads);
+
+      const breakwaterRocks=[];
+      for(let z=-450;z<=190;z+=8)for(let row=-1;row<=1;row++)breakwaterRocks.push({p:[-220+row*5+random()*3,-.4+random()*1.6,z+random()*4],s:[4+random()*3,3+random()*2,5+random()*3],r:[random(),random(),random()]});
+      instances(new THREE.DodecahedronGeometry(1,0),new THREE.MeshStandardMaterial({color:0x757e77,roughness:1}),breakwaterRocks);
+      box(8,3,650,buildingWall,-220,.2,-130);
+      const lighthouse=new THREE.Group();lighthouse.position.set(-220,2,196);scene.add(lighthouse);
+      for(let i=0;i<5;i++){
+        const section=new THREE.Mesh(new THREE.CylinderGeometry(3.5-i*.25,3.75-i*.25,4,24),i%2?redSteel:whiteSteel);
+        section.position.y=2+i*4;section.castShadow=true;lighthouse.add(section);
+      }
+      const lantern=new THREE.Mesh(new THREE.CylinderGeometry(2.7,2.7,3.5,12),glass);lantern.position.y=21.5;lighthouse.add(lantern);
+      const cap=new THREE.Mesh(new THREE.ConeGeometry(3.7,2.5,24),redSteel);cap.position.y=24.5;lighthouse.add(cap);
+      instances(new THREE.CylinderGeometry(1,1,1,24),whiteSteel,[{p:[-220,22,196],s:[3.8,.5,3.8]},{p:[-220,25.3,196],s:[3.1,.4,3.1]}]);
+      const buoyBases=[],buoyPosts=[];
+      for(const [x,z] of [[-125,280],[-130,75],[-140,-140],[-130,-350]]){
+        buoyBases.push({p:[x,.5,z],s:[2.2,1.4,2.2]});buoyPosts.push({p:[x,3,z],s:[.35,4,.35]});
+      }
+      instances(new THREE.ConeGeometry(1,1,12),redSteel,buoyBases);instances(cylinders,redSteel,buoyPosts);
+      instances(new THREE.ConeGeometry(1,1,12),tealSteel,[{p:[-70,.5,295],s:[2.2,1.4,2.2]},{p:[-65,.5,-355],s:[2.2,1.4,2.2]}]);
+      instances(cylinders,tealSteel,[{p:[-70,3,295],s:[.35,4,.35]},{p:[-65,3,-355],s:[.35,4,.35]}]);
+
       const composer=new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene,camera));
       const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.13,.5,1.25);
@@ -664,9 +814,9 @@
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();renderer.setAnimationLoop(null);fail(new Error('WebGL context lost'));});
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
-      const metrics={phase:2,quality,frames:0,drawCalls:0,triangles:0};
+      const metrics={phase:3,quality,frames:0,drawCalls:0,triangles:0};
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount})});
       renderer.setAnimationLoop(()=>{
         const dt=Math.min(clock.getDelta(),.05);
         if(document.hidden)return;
