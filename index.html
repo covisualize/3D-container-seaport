@@ -64,10 +64,10 @@
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 22h20l-5 5H11zM11 7v12m10-12v12M8 11h16M16 4v18"/></svg></div>
     <div><div class="eyebrow">Halvard · North Terminal</div><h1>Aurora Strait</h1></div>
   </header>
-  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 01</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 02</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
   <div id="status" role="status" aria-live="polite"></div>
   <footer class="bottom">
-    <div class="caption"><strong>A quiet moment before arrival.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
+    <div class="caption"><strong>Aurora Strait. Alongside at Halvard.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
     <nav class="toolbar" aria-label="Scene controls">
       <span class="orbit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2"/></svg>Orbit</span>
       <div class="divider"></div>
@@ -77,7 +77,7 @@
       <button id="fullscreen" class="icon-button" aria-label="Enter fullscreen" title="Fullscreen">⛶</button>
     </nav>
   </footer>
-  <div id="loading" role="status"><div class="eyebrow">Halvard / North Terminal</div><h2>Opening the strait.</h2><p id="loading-message">Preparing the sea, sky and shoreline…</p></div>
+  <div id="loading" role="status"><div class="eyebrow">Halvard / North Terminal</div><h2>Opening the strait.</h2><p id="loading-message">Preparing the harbour and its cargo…</p></div>
   <noscript>This harbour needs JavaScript and a browser with WebGL 2 support.</noscript>
   <script type="module">
     // A single-file scene. Every texture and piece of geometry is generated here.
@@ -124,9 +124,9 @@
       function resetView() {
         // Drain any orbit inertia before restoring a deterministic home pose.
         controls.enableDamping=false;controls.update();
-        camera.position.set(-460, 220, 520);
-        controls.target.set(80, 3, -25);
-        controls.cursor.set(80, 3, -25);
+        camera.position.set(-250, 130, 295);
+        controls.target.set(35, 14, 0);
+        controls.cursor.set(35, 14, 0);
         controls.update();
         controls.enableDamping=true;
       }
@@ -256,18 +256,18 @@
       }
 
       const unitBox = new THREE.BoxGeometry(1,1,1);
-      function box(w,h,d,material,x,y,z){
+      function box(w,h,d,material,x,y,z,parent=scene){
         const mesh=new THREE.Mesh(unitBox,material);mesh.scale.set(w,h,d);mesh.position.set(x,y,z);
-        mesh.castShadow=true;mesh.receiveShadow=true;scene.add(mesh);return mesh;
+        mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;
       }
       const dummy = new THREE.Object3D();
-      function instances(geometry,material,transforms,cast=true){
+      function instances(geometry,material,transforms,cast=true,parent=scene){
         const mesh=new THREE.InstancedMesh(geometry,material,transforms.length);
         transforms.forEach((t,i)=>{
           dummy.position.set(...t.p);dummy.rotation.set(...(t.r||[0,0,0]));dummy.scale.set(...(t.s||[1,1,1]));
           dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);
         });
-        mesh.castShadow=cast;mesh.receiveShadow=true;mesh.computeBoundingSphere();scene.add(mesh);return mesh;
+        mesh.castShadow=cast;mesh.receiveShadow=true;mesh.computeBoundingSphere();parent.add(mesh);return mesh;
       }
       const concreteMat = new THREE.MeshStandardMaterial({color:0xe1d2b6,map:concrete,bumpMap:concrete,bumpScale:.08,roughness:.94,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1});
       const wallMat = new THREE.MeshStandardMaterial({map:wallTexture,roughness:1});
@@ -323,6 +323,280 @@
       instances(new THREE.PlaneGeometry(2.8,6),new THREE.MeshStandardMaterial({map:arrows,transparent:true,depthWrite:false,roughness:1}),[-215,-95,25,145,265].flatMap(z=>[
         {p:[113.7,3.055,z],r:[-Math.PI/2,0,0]},{p:[133.7,3.055,z],r:[-Math.PI/2,0,Math.PI]}
       ]),false);
+
+      // Phase 2 — Aurora Strait. Ship-local coordinates keep future swell animation coherent.
+      const ship = new THREE.Group(); ship.name='Aurora Strait';ship.position.x=34;scene.add(ship);
+      const steel=new THREE.MeshStandardMaterial({color:0x171e20,metalness:.58,roughness:.68});
+      const redSteel=new THREE.MeshStandardMaterial({color:0x74291f,metalness:.28,roughness:.8});
+      const deckSteel=new THREE.MeshStandardMaterial({color:0x535d54,metalness:.32,roughness:.82});
+      const whiteSteel=new THREE.MeshStandardMaterial({color:0xe8e4d5,metalness:.12,roughness:.66});
+      const tealSteel=new THREE.MeshStandardMaterial({color:0x215e61,metalness:.4,roughness:.57});
+      const glass=new THREE.MeshStandardMaterial({color:0x12333e,metalness:.65,roughness:.18});
+      const shipBox=(w,h,d,mat,x,y,z)=>box(w,h,d,mat,x,y,z,ship);
+      const shipInstances=(geo,mat,ts,cast=true)=>instances(geo,mat,ts,cast,ship);
+      const outline=new THREE.Shape();
+      outline.moveTo(-15,-151);outline.lineTo(15,-151);
+      outline.quadraticCurveTo(21,-149,21,-128);outline.lineTo(21,100);
+      outline.bezierCurveTo(21,133,11,164,0,178);
+      outline.bezierCurveTo(-11,164,-21,133,-21,100);outline.lineTo(-21,-128);
+      outline.quadraticCurveTo(-21,-149,-15,-151);
+      const perimeter=outline.getPoints(20);perimeter.pop();
+      const sheer=z=>THREE.MathUtils.smoothstep(z,115,178)*2.7;
+      function hullBand(bottom,top,bottomScale,topScale,mat){
+        const p=[],uv=[],idx=[],n=perimeter.length;
+        for(const [y,scale] of [[bottom,bottomScale],[top,topScale]])perimeter.forEach(v=>{
+          p.push(v.x*scale,y+sheer(v.y),v.y);uv.push((v.y+151)/329,(y+6)/21);
+        });
+        for(let i=0;i<n;i++){const j=(i+1)%n;idx.push(i,i+n,j,j,i+n,j+n);}
+        const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
+        g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();
+        const mesh=new THREE.Mesh(g,mat);mesh.castShadow=mesh.receiveShadow=true;ship.add(mesh);
+      }
+      const hullPatina=canvasTexture(2048,256,(ctx,w,h)=>{
+        ctx.fillStyle='#b3b9b7';ctx.fillRect(0,0,w,h);
+        ctx.strokeStyle='#27302a35';ctx.lineWidth=1;
+        for(let x=0;x<w;x+=96){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+        for(let y=0;y<h;y+=36){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+        for(let i=0;i<180;i++){
+          const x=random()*w,y=random()*h;const g=ctx.createLinearGradient(x,y,x,y+70);
+          g.addColorStop(0,'#65412760');g.addColorStop(1,'#65412700');ctx.fillStyle=g;ctx.fillRect(x,y,1+random()*3,70);
+        }
+      });
+      steel.map=hullPatina;
+      hullBand(-7,-2,.65,.96,redSteel);hullBand(-2,1.5,.96,1,redSteel);
+      hullBand(1.5,12.4,1,1.015,steel);
+      const deckP=[0,12.4,0],deckIdx=[];
+      perimeter.forEach(v=>deckP.push(v.x*1.015,12.4+sheer(v.y),v.y));
+      for(let i=0;i<perimeter.length;i++)deckIdx.push(0,(i+1)%perimeter.length+1,i+1);
+      const deckGeo=new THREE.BufferGeometry();deckGeo.setAttribute('position',new THREE.Float32BufferAttribute(deckP,3));deckGeo.setIndex(deckIdx);deckGeo.computeVertexNormals();
+      const shipDeck=new THREE.Mesh(deckGeo,deckSteel);shipDeck.receiveShadow=true;ship.add(shipDeck);
+      // Bulbous bow under the waterline and the raised, empty working forecastle.
+      const bulb=new THREE.Mesh(new THREE.SphereGeometry(1,20,12),redSteel);
+      bulb.scale.set(3.4,3.3,10);bulb.position.set(0,-3,174);ship.add(bulb);
+      const hatchCovers=[];
+      for(let bay=0;bay<17;bay++)hatchCovers.push({p:[0,12.75,-101+bay*12.8],s:[36.4,.7,12.5]});
+      shipInstances(unitBox,deckSteel,hatchCovers);
+
+      // Container atlas: side, roof and paired doors in one texture / draw per shipping line.
+      // All six faces share one material; no six-material draw-call multiplier.
+      const lines=[
+        {name:'HALDEN',color:'#a54432',ink:'#eee6d3',code:'HLDU'},
+        {name:'SEALINK',color:'#226b78',ink:'#e4ece0',code:'SLKU'},
+        {name:'NORDHAVN',color:'#d2cbb3',ink:'#344e56',code:'NHVU'},
+        {name:'MERIDIAN',color:'#a47d3d',ink:'#ece3cb',code:'MRDU'},
+        {name:'PELAGIC',color:'#334b62',ink:'#dedfcf',code:'PLGU'},
+        {name:'TIDELINE',color:'#557262',ink:'#e4e4ce',code:'TDLU'}
+      ];
+      function containerAtlas(line){return canvasTexture(1024,512,(ctx,w,h)=>{
+        ctx.fillStyle=line.color;ctx.fillRect(0,0,w,h);
+        // Painted folded steel and seam shadows on the long side.
+        for(let x=0;x<768;x+=16){
+          ctx.fillStyle='#00000024';ctx.fillRect(x,0,4,160);
+          ctx.fillStyle='#ffffff16';ctx.fillRect(x+4,0,2,160);
+        }
+        ctx.fillStyle='#00000030';ctx.fillRect(0,0,768,5);ctx.fillRect(0,155,768,5);
+        ctx.fillRect(0,0,6,160);ctx.fillRect(762,0,6,160);
+        ctx.fillStyle=line.ink;ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.font=`italic bold ${line.name.length>7?43:58}px sans-serif`;ctx.fillText(line.name,395,77);
+        // Invented wave mark, hand drawn in canvas.
+        ctx.lineWidth=4;ctx.strokeStyle=line.ink;ctx.beginPath();
+        for(let x=0;x<86;x++){const y=76+Math.sin(x/86*Math.PI*2)*10;x?ctx.lineTo(70+x,y):ctx.moveTo(70+x,y);}ctx.stroke();
+        ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(line.code+'  481 216  /  45G1',18,139);
+        ctx.fillText('INTERNATIONAL CONTAINER TRANSPORT',220,118);
+        // Roof panel: narrow longitudinal ribs and recessed top rails.
+        for(let x=0;x<768;x+=16){ctx.fillStyle='#00000024';ctx.fillRect(x,256,4,256);ctx.fillStyle='#ffffff14';ctx.fillRect(x+4,256,2,256);}
+        ctx.strokeStyle='#1f2b2945';ctx.lineWidth=6;ctx.strokeRect(4,260,760,248);
+        // End doors: two leaves, seals, four zinc lock rods, hinges and warning placard.
+        ctx.strokeStyle='#14252399';ctx.lineWidth=5;ctx.strokeRect(774,6,244,244);
+        ctx.fillStyle='#10212290';ctx.fillRect(893,8,5,238);
+        for(const x of [800,843,943,986]){
+          ctx.fillStyle='#17272380';ctx.fillRect(x-2,14,7,227);
+          ctx.fillStyle='#c2c4b5';ctx.fillRect(x,13,3,228);
+          for(const y of [27,114,222]){ctx.fillStyle='#c3c4b6';ctx.fillRect(x-5,y,13,5);}
+          ctx.fillStyle='#aaa998';ctx.fillRect(x-5,183,18,5);
+        }
+        ctx.fillStyle=line.ink;ctx.textAlign='left';ctx.font='bold 13px monospace';ctx.fillText(line.code+' 481216 4',911,51);
+        ctx.font='10px monospace';ctx.fillText('45G1',912,69);ctx.font='8px monospace';
+        ['MAX.GR 30,480 KG','TARE    3,880 KG','NET    26,600 KG','CU.CAP  76.4 M3'].forEach((s,i)=>ctx.fillText(s,904,91+i*12));
+        ctx.fillStyle='#debd55';ctx.fillRect(863,165,22,25);ctx.fillStyle='#27332b';ctx.font='bold 19px sans-serif';ctx.fillText('!',871,178);
+        // A little salt fading, edge rust and paint chips, rather than uniform noise.
+        for(let i=0;i<1300;i++){
+          const x=random()*w,y=random()*h;ctx.fillStyle=i%3?'#251e151b':'#e7d5a220';ctx.fillRect(x,y,1+random()*4,1+random()*2);
+        }
+        for(let i=0;i<55;i++){
+          const x=random()*768,y=random()>.5?6:145;ctx.fillStyle='#58352465';ctx.fillRect(x,y,1+random()*3,3+random()*12);
+        }
+      });}
+      const containerBump=canvasTexture(1024,512,(ctx,w,h)=>{
+        ctx.fillStyle='#808080';ctx.fillRect(0,0,w,h);
+        for(let x=0;x<768;x+=16){ctx.fillStyle='#404040';ctx.fillRect(x,0,4,160);ctx.fillRect(x,256,4,256);ctx.fillStyle='#b0b0b0';ctx.fillRect(x+4,0,3,160);ctx.fillRect(x+4,256,3,256);}
+        ctx.fillStyle='#bcbcbc';for(const x of [800,843,943,986])ctx.fillRect(x,13,3,228);
+        ctx.fillStyle='#303030';ctx.fillRect(893,8,5,238);
+      },false);
+      function containerGeometry(detailed){
+        const g=new THREE.BoxGeometry(2.44,2.59,12.19,1,1,detailed?96:1);
+        const pos=g.attributes.position,uv=g.attributes.uv;
+        for(const group of g.groups){
+          const seen=new Set();
+          for(let i=group.start;i<group.start+group.count;i++){
+            const v=g.index.getX(i);if(seen.has(v))continue;seen.add(v);
+            let u=uv.getX(v),t=uv.getY(v),px,py;
+            if(group.materialIndex<2){px=2+u*764;py=2+(1-t)*156;}
+            else if(group.materialIndex<4){px=2+(1-t)*764;py=258+u*252;}
+            else{px=770+u*252;py=2+(1-t)*252;}
+            uv.setXY(v,px/1024,1-py/512);
+            if(detailed&&Math.abs(pos.getX(v))>1.2){
+              const fold=Math.round((pos.getZ(v)+6.095)/12.19*96)%2;
+              pos.setX(v,Math.sign(pos.getX(v))*(1.22-(fold?.025:0)));
+            }
+          }
+        }
+        if(!detailed){g.clearGroups();return g;}
+        // Only the two long sides need folded geometry; roof/end detail stays in the atlas.
+        const sideCount=g.groups[2].start,expanded=g.toNonIndexed();
+        const coarse=containerGeometry(false),flat=coarse.toNonIndexed(),result=new THREE.BufferGeometry();
+        for(const name of ['position','uv']){
+          const a=expanded.attributes[name],b=flat.attributes[name];
+          const side=a.array.slice(0,sideCount*a.itemSize),caps=b.array.slice(12*b.itemSize);
+          const data=new Float32Array(side.length+caps.length);data.set(side);data.set(caps,side.length);
+          result.setAttribute(name,new THREE.BufferAttribute(data,a.itemSize));
+        }
+        g.dispose();expanded.dispose();coarse.dispose();flat.dispose();
+        result.computeVertexNormals();result.computeBoundingSphere();return result;
+      }
+      const containerCoarse=containerGeometry(false),containerFine=containerGeometry(true);
+      const containerBatches=[],containerDetailBatches=[],containerSlots=[];
+      const manifest=lines.map(()=>[]);
+      for(let bay=0;bay<17;bay++)for(let row=0;row<14;row++){
+        const height=bay>13?4:bay<2?5:5+((bay*7+row*3)%3);
+        for(let tier=0;tier<height;tier++){
+          const line=Math.floor(random()*lines.length);
+          const slot={p:[(row-6.5)*2.54,14.445+tier*2.68,-101+bay*12.8],bay,row,tier,line};
+          manifest[line].push(slot);containerSlots.push(slot);
+        }
+      }
+      manifest.forEach((transforms,i)=>{
+        const material=new THREE.MeshStandardMaterial({map:containerAtlas(lines[i]),bumpMap:containerBump,bumpScale:.045,metalness:.18,roughness:.83});
+        const mesh=shipInstances(containerCoarse,material,transforms);
+        mesh.name=lines[i].name+' containers';mesh.userData.containerBatch=true;
+        const nearMesh=new THREE.InstancedMesh(containerFine,material,transforms.length);
+        nearMesh.name=lines[i].name+' near containers';nearMesh.castShadow=nearMesh.receiveShadow=true;
+        nearMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        transforms.forEach((slot,j)=>{
+          slot.matrix=new THREE.Matrix4();mesh.getMatrixAt(j,slot.matrix);
+          slot.tint=new THREE.Color().setScalar(.78+random()*.22);
+          mesh.setColorAt(j,slot.tint);nearMesh.setColorAt(j,slot.tint);
+        });
+        nearMesh.count=0;nearMesh.visible=false;ship.add(nearMesh);
+        containerBatches.push(mesh);containerDetailBatches.push(nearMesh);
+      });
+      let containerDetail=false,lastDetailQuality;
+      const lastDetailCamera=new THREE.Vector3(Infinity,Infinity,Infinity);
+      const slotPosition=new THREE.Vector3(),hiddenMatrix=new THREE.Matrix4().makeScale(0,0,0);
+      function updateContainerDetail(high){
+        if(lastDetailQuality===high&&lastDetailCamera.distanceToSquared(camera.position)<64)return;
+        lastDetailCamera.copy(camera.position);lastDetailQuality=high;let promoted=0;
+        ship.updateMatrixWorld(true);
+        manifest.forEach((slots,i)=>{
+          const base=containerBatches[i],near=containerDetailBatches[i];let count=0;
+          slots.forEach((slot,j)=>{
+            slotPosition.set(...slot.p).applyMatrix4(ship.matrixWorld);
+            const detailed=high&&slotPosition.distanceToSquared(camera.position)<75*75;
+            base.setMatrixAt(j,detailed?hiddenMatrix:slot.matrix);
+            if(detailed){near.setMatrixAt(count,slot.matrix);near.setColorAt(count,slot.tint);count++;}
+          });
+          base.instanceMatrix.needsUpdate=true;near.count=count;near.visible=count>0;
+          if(count){near.instanceMatrix.needsUpdate=true;near.instanceColor.needsUpdate=true;near.computeBoundingSphere();}
+          promoted+=count;
+        });
+        containerDetail=promoted>0;renderer.shadowMap.needsUpdate=true;
+      }
+
+      // White stern accommodation, wraparound bridge, deck ledges and dark glazing.
+      shipBox(27,18,22,whiteSteel,0,22.2,-128);
+      shipBox(31,1,25,whiteSteel,0,13.1,-128);
+      shipBox(31,1,24,whiteSteel,0,31.5,-128);
+      shipBox(38,4.3,12,whiteSteel,0,34.2,-124);
+      shipBox(40,.65,14,whiteSteel,0,36.7,-124);
+      shipBox(33,.45,24,deckSteel,0,32,-128);
+      const cabinWindows=[],ledges=[];
+      for(const y of [17,21,25,29]){
+        for(let x=-10;x<=10;x+=4)for(const z of [-116.94,-139.06])cabinWindows.push({p:[x,y,z],s:[1.45,1.35,.12]});
+        for(const x of [-13.56,13.56])for(let z=-135;z<=-119;z+=4)cabinWindows.push({p:[x,y,z],s:[.12,1.35,1.45]});
+        ledges.push({p:[0,y-1.7,-128],s:[28,.22,23]});
+      }
+      for(let x=-17;x<=17;x+=2.7)for(const z of [-117.93,-130.07])cabinWindows.push({p:[x,34.6,z],s:[2.25,1.8,.13]});
+      for(const x of [-19.07,19.07])for(let z=-128;z<=-120;z+=2.8)cabinWindows.push({p:[x,34.6,z],s:[.13,1.8,2.3]});
+      shipInstances(unitBox,glass,cabinWindows,false);shipInstances(unitBox,whiteSteel,ledges);
+      shipBox(7,8,8,tealSteel,7,35.8,-138);shipBox(7.2,1.6,8.2,steel,7,40.3,-138);
+      const cylinders=new THREE.CylinderGeometry(1,1,1,8);
+      const fittings=[{p:[-4,41.5,-124],s:[.22,9,.22]},{p:[-4,45.4,-124],s:[.12,9,.12],r:[0,0,Math.PI/2]}];
+      for(const x of [-7,0,8])fittings.push({p:[x,39,-120],s:[.065,4,.065]});
+      shipInstances(cylinders,whiteSteel,fittings);
+      shipInstances(unitBox,whiteSteel,[{p:[-4,45.5,-124],s:[7,.5,.8]},{p:[-4,42.7,-124],s:[4,.4,.65]}]);
+      shipInstances(new THREE.SphereGeometry(1,12,8),whiteSteel,[{p:[-10,38,-127],s:[1.2,1.2,1.2]},{p:[9,38,-121],s:[.85,.85,.85]}]);
+      shipInstances(new THREE.CapsuleGeometry(1.3,4.5,4,12),new THREE.MeshStandardMaterial({color:0xd86224,roughness:.6}),[
+        {p:[-16,19,-128],r:[Math.PI/2,0,0],s:[1,1,.85]},{p:[16,19,-128],r:[Math.PI/2,0,0],s:[1,1,.85]}
+      ]);
+      shipInstances(unitBox,whiteSteel,[-1,1].flatMap(sign=>[-131,-125].map(z=>({p:[sign*17,20,z],s:[.28,5,.28]}))));
+
+      // Railings and mooring lines are instanced cylinders, not hundreds of mesh objects.
+      function rod(a,b,r){
+        const start=new THREE.Vector3(...a),end=new THREE.Vector3(...b),direction=end.clone().sub(start);
+        const rotation=new THREE.Euler().setFromQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),direction.clone().normalize()));
+        return {p:start.add(end).multiplyScalar(.5).toArray(),s:[r,direction.length(),r],r:[rotation.x,rotation.y,rotation.z]};
+      }
+      const rails=[];
+      for(const sign of [-1,1]){
+        for(let z=-110;z<=110;z+=4)rails.push(rod([sign*20.5,12.6,z],[sign*20.5,13.8,z],.045));
+        for(const y of [13.2,13.8])rails.push(rod([sign*20.5,y,-112],[sign*20.5,y,112],.045));
+      }
+      for(let i=0;i<perimeter.length;i++){
+        const a=perimeter[i],b=perimeter[(i+1)%perimeter.length];if(a.y>-113&&a.y<112)continue;
+        rails.push(rod([a.x,12.6+sheer(a.y),a.y],[a.x,13.8+sheer(a.y),a.y],.05));
+        rails.push(rod([a.x,13.8+sheer(a.y),a.y],[b.x,13.8+sheer(b.y),b.y],.05));
+      }
+      for(const z of [-131, -117]){
+        for(let x=-20;x<=20;x+=2.5)rails.push(rod([x,37,z],[x,38,z],.045));
+        rails.push(rod([-20,38,z],[20,38,z],.045));
+      }
+      shipInstances(cylinders,whiteSteel,rails);
+      const ropes=[];
+      for(const [z,targetZ,x] of [[-142,-156,51],[-133,-108,54],[131,156,50],[145,132,45]]){
+        const from=new THREE.Vector3(x,12.8+sheer(z),z),to=new THREE.Vector3(65,4,targetZ);
+        const mid=from.clone().lerp(to,.5);mid.y-=2;
+        const curve=new THREE.QuadraticBezierCurve3(from,mid,to).getPoints(20);
+        for(let i=0;i<curve.length-1;i++)ropes.push(rod(curve[i].toArray(),curve[i+1].toArray(),.11));
+      }
+      instances(cylinders,new THREE.MeshStandardMaterial({color:0xaa9670,roughness:1}),ropes);
+      const deckGear=[];
+      for(const x of [-7,7])for(const z of [141,155])deckGear.push({p:[x,14.7,z],s:[1.1,1.6,1.1]});
+      shipInstances(cylinders,steel,deckGear);
+      shipInstances(unitBox,steel,[{p:[-7,14,144],s:[3,.7,6]},{p:[7,14,144],s:[3,.7,6]}]);
+
+      // Ship identity: readable on both hull sides and on the transom.
+      function lettering(text,sub,w,h){return canvasTexture(w,h,(ctx)=>{
+        ctx.fillStyle='#e9e8d8';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.font=`600 ${h*.36}px sans-serif`;ctx.fillText(text,w/2,h*.35,w*.94);
+        ctx.font=`${h*.15}px sans-serif`;ctx.fillText(sub,w/2,h*.78,w*.8);
+      });}
+      function shipDecal(text,sub,w,h,p,rotation){
+        const t=lettering(text,sub,1024,256);t.wrapS=t.wrapT=THREE.ClampToEdgeWrapping;
+        const mat=new THREE.MeshStandardMaterial({map:t,transparent:true,depthWrite:false,roughness:.8,polygonOffset:true,polygonOffsetFactor:-2});
+        const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);mesh.position.set(...p);mesh.rotation.set(...rotation);ship.add(mesh);
+      }
+      shipDecal('AURORA STRAIT','HALVARD',39,5.2,[-21.34,7.6,72],[0,-Math.PI/2,0]);
+      shipDecal('AURORA STRAIT','HALVARD',39,5.2,[21.34,7.6,72],[0,Math.PI/2,0]);
+      shipDecal('AURORA STRAIT','HALVARD',20,4,[0,7,-151.04],[0,Math.PI,0]);
+      const draftMap=canvasTexture(128,512,(ctx)=>{
+        ctx.fillStyle='#e4e5d5';ctx.font='bold 35px monospace';
+        for(let i=0;i<8;i++){ctx.fillText(String(12-i),40,40+i*60);ctx.fillRect(0,23+i*60,26,5);}
+      });
+      shipInstances(new THREE.PlaneGeometry(1.4,7),new THREE.MeshStandardMaterial({map:draftMap,transparent:true,depthWrite:false,roughness:1}),[
+        {p:[-21.31,5.1,96],r:[0,-Math.PI/2,0]},{p:[21.31,5.1,96],r:[0,Math.PI/2,0]},
+        {p:[-21.31,5.1,-104],r:[0,-Math.PI/2,0]},{p:[21.31,5.1,-104],r:[0,Math.PI/2,0]}
+      ],false);
 
       // One rugged volcanic mesh, instanced into a distant archipelago.
       const radial=96,rings=34,positions=[],colors=[],indices=[];
@@ -390,9 +664,9 @@
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();renderer.setAnimationLoop(null);fail(new Error('WebGL context lost'));});
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
-      const metrics={phase:1,quality,frames:0,drawCalls:0,triangles:0};
+      const metrics={phase:2,quality,frames:0,drawCalls:0,triangles:0};
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:scene.children.filter(x=>x.isInstancedMesh).length})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name})});
       renderer.setAnimationLoop(()=>{
         const dt=Math.min(clock.getDelta(),.05);
         if(document.hidden)return;
@@ -401,6 +675,7 @@
         // Keep the camera above sea level and above the quay when zooming close.
         const overQuay=camera.position.x>59&&camera.position.x<241&&Math.abs(camera.position.z)<301;
         camera.position.y=Math.max(camera.position.y,overQuay?5:1.8);
+        updateContainerDetail(quality==='high');
         renderer.info.reset();
         composer.render();
         frameCount++;metrics.frames=frameCount;metrics.quality=quality;
