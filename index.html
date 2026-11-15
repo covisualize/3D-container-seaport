@@ -69,8 +69,9 @@
     @media (max-width:650px) {.toolbar {flex-wrap:wrap;justify-content:center;gap:4px;}.toolbar .divider{display:none;} .caption{max-width:100%;}.caption strong{display:none;}#camera-mode{max-width:100px;} .toolbar label{font-size:8px;} .toolbar button{padding:0 6px;} #touch-move{bottom:220px;}}
     @media (prefers-reduced-motion: reduce) { #loading { transition: none; } }
   </style>
-  <script type="importmap">
-    { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+  <script>
+    const assetHost=new URLSearchParams(location.search).get('cdn')==='unpkg'?'https://unpkg.com/three@0.170.0/':'https://cdn.jsdelivr.net/npm/three@0.170.0/';
+    const map=document.createElement('script');map.type='importmap';map.textContent=JSON.stringify({imports:{three:assetHost+'build/three.module.js','three/addons/':assetHost+'examples/jsm/'}});document.currentScript.after(map);
   </script>
 </head>
 <body>
@@ -108,11 +109,22 @@
     // Coordinates are metres: +Y up; quay runs along Z, water is west (-X).
     const loading = document.querySelector('#loading');
     const loadingMessage = document.querySelector('#loading-message');
+    const mobileDevice=matchMedia('(pointer:coarse)').matches||innerWidth<650;
+    const safeMode=mobileDevice||new URLSearchParams(location.search).has('safe');
     function fail(error) {
       console.error(error);
       loading.classList.remove('hidden');
       loading.querySelector('h2').textContent = 'The harbour could not open.';
-      loadingMessage.textContent = 'Use a WebGL 2 capable browser with hardware acceleration enabled, and allow access to cdn.jsdelivr.net. Then reload this page.';
+      const detail=String(error?.message||error);
+      if(/fetch|import|module|network/i.test(detail)&&new URLSearchParams(location.search).get('cdn')!=='unpkg'){
+        loading.querySelector('h2').textContent='Trying another connection…';
+        const url=new URL(location.href);url.searchParams.set('cdn','unpkg');location.replace(url.href);return;
+      }
+      loadingMessage.textContent='Startup error: '+detail+'.';
+      if(!document.querySelector('#retry-harbour')){
+        const retry=document.createElement('button');retry.id='retry-harbour';retry.textContent='Retry in compatibility mode';
+        retry.onclick=()=>{const url=new URL(location.href);url.searchParams.set('safe','1');url.searchParams.set('retry',Date.now());location.replace(url.href);};loading.append(retry);
+      }
     }
     try {
       const [THREE, { OrbitControls }, { Water }, { Sky }, { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
@@ -122,7 +134,7 @@
         import('three/addons/postprocessing/UnrealBloomPass.js'), import('three/addons/postprocessing/OutputPass.js')
       ]);
       const canvas = document.querySelector('#scene');
-      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: !safeMode, powerPreference: safeMode?'default':'high-performance' });
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 0.85;
@@ -267,7 +279,7 @@
       // Keep both reflection targets allocated so quality switches never leak resources.
       const waterGeometry = new THREE.PlaneGeometry(24000,24000);
       const waters = {};
-      for(const [quality,size] of [['high',1024],['low',512]]){
+      for(const [quality,size] of [['high',safeMode?512:1024],['low',safeMode?256:512]]){
         const sea=new Water(waterGeometry,{textureWidth:size,textureHeight:size,waterNormals,
           sunDirection,sunColor:0xfff2d8,waterColor:0x146560,distortionScale:2.2,fog:true});
         sea.rotation.x=-Math.PI/2;sea.position.y=.02;
@@ -939,7 +951,7 @@
       const qualitySelect=document.querySelector('#quality');
       let quality='high',water=waters.high;
       function resize(){
-        const ratio=Math.min(devicePixelRatio,quality==='high'?1.5:1);
+        const ratio=Math.min(devicePixelRatio,quality==='high'&&!safeMode?1.5:1);
         renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
         composer.setPixelRatio(ratio);composer.setSize(innerWidth,innerHeight);
         camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
@@ -948,14 +960,14 @@
         quality=value;qualitySelect.value=value;
         for(const [key,sea] of Object.entries(waters))sea.visible=key===value;
         water=waters[value];bloom.enabled=value==='high';
-        const resolution=value==='high'?2048:1024;
+        const resolution=value==='high'?(safeMode?1024:2048):(safeMode?512:1024);
         sun.shadow.mapSize.set(resolution,resolution);
         if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}
         renderer.shadowMap.needsUpdate=true;resize();
         try{localStorage.setItem('aurora-quality',value);}catch{}
       }
       let savedQuality;try{savedQuality=localStorage.getItem('aurora-quality');}catch{}
-      setQuality(savedQuality==='low'?'low':'high');
+      setQuality(safeMode?'low':savedQuality==='low'?'low':'high');
       // Phase 5 — continuous solar time. No external sky, star or lighting textures.
       let timeOfDay=12,nightAmount=0,environmentTimer;
       const hemisphere=scene.children.find(o=>o.isHemisphereLight);
@@ -1204,7 +1216,7 @@
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
       const metrics={phase:6,quality,frames:0,drawCalls:0,triangles:0,fps:0};let frameAverage=1/60;
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,cameraMode,audioMuted:sound.muted,audioState:sound.context?.state||'not started',audioVoices:sound.voices.size,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?(safeMode?512:1024):(safeMode?256:512),safeMode,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,cameraMode,audioMuted:sound.muted,audioState:sound.context?.state||'not started',audioVoices:sound.voices.size,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
       renderer.setAnimationLoop(()=>{
         const elapsed=clock.getDelta(),dt=Math.min(elapsed,.05);
         if(elapsed>0){frameAverage=frameAverage*.95+elapsed*.05;metrics.fps=Math.round(1/frameAverage);}
