@@ -60,6 +60,13 @@
       .caption strong { font-size: 12px; } .eyebrow { font-size: 8px; }
       #status { right: 20px; }
     }
+    .sr-only {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
+    #touch-move {position:fixed;left:20px;bottom:145px;padding:6px;background:#f4f7ede8;border-radius:8px;}
+    #touch-move button {min-width:38px;min-height:42px;touch-action:none;font-size:19px;}
+    [hidden] {display:none!important;}
+    .caption {max-width:400px;}.caption span {display:block;line-height:1.6;}
+    #camera-mode {max-width:130px;}
+    @media (max-width:650px) {.toolbar {flex-wrap:wrap;justify-content:center;gap:4px;}.toolbar .divider{display:none;} .caption{max-width:100%;}.caption strong{display:none;}#camera-mode{max-width:100px;} .toolbar label{font-size:8px;} .toolbar button{padding:0 6px;} #touch-move{bottom:220px;}}
     @media (prefers-reduced-motion: reduce) { #loading { transition: none; } }
   </style>
   <script type="importmap">
@@ -72,7 +79,7 @@
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 22h20l-5 5H11zM11 7v12m10-12v12M8 11h16M16 4v18"/></svg></div>
     <div><div class="eyebrow">Halvard · North Terminal</div><h1>Aurora Strait</h1></div>
   </header>
-  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Harbour study / 05</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Living harbour / 06</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
   <section class="time-control" aria-label="Time of day">
     <label for="time" id="time-label">12:00 · DAYLIGHT</label>
     <input id="time" type="range" min="5" max="23" step="0.05" value="12" aria-label="Time of day">
@@ -80,16 +87,20 @@
   </section>
   <div id="status" role="status" aria-live="polite"></div>
   <footer class="bottom">
-    <div class="caption"><strong>Halvard. The working waterfront.</strong><span>Drag to orbit &nbsp; · &nbsp; Scroll to explore &nbsp; · &nbsp; Right-drag to pan</span></div>
+    <div class="caption"><strong>Halvard. The working waterfront.</strong><span id="camera-help">Drag to orbit · Scroll to zoom · Right-drag to pan</span></div>
     <nav class="toolbar" aria-label="Scene controls">
-      <span class="orbit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="12" cy="12" rx="10" ry="5" transform="rotate(-30 12 12)"/><circle cx="12" cy="12" r="2"/></svg>Orbit</span>
+      <label class="sr-only" for="camera-mode">Camera mode</label><select id="camera-mode" aria-label="Camera mode"><option value="orbit">Orbit</option><option value="drone">Drone</option><option value="walk">Walk</option><option value="tour">Cinematic tour</option></select>
       <div class="divider"></div>
       <label for="quality">QUALITY</label><select id="quality" aria-label="Render quality"><option value="high">High</option><option value="low">Low</option></select>
       <div class="divider"></div>
       <button id="reset" title="Return to the harbour overview">Reset view</button>
+      <button id="sound" aria-label="Enable ambient sound" aria-pressed="false">Sound off</button>
       <button id="fullscreen" class="icon-button" aria-label="Enter fullscreen" title="Fullscreen">⛶</button>
     </nav>
   </footer>
+  <div id="touch-move" hidden aria-label="Movement controls">
+    <button data-move="KeyW" aria-label="Move forward">↑</button><button data-move="KeyA" aria-label="Move left">←</button><button data-move="KeyS" aria-label="Move backward">↓</button><button data-move="KeyD" aria-label="Move right">→</button><button data-move="KeyQ" data-vertical aria-label="Fly down">−</button><button data-move="KeyE" data-vertical aria-label="Fly up">+</button>
+  </div>
   <div id="loading" role="status"><div class="eyebrow">Halvard / North Terminal</div><h2>Opening the strait.</h2><p id="loading-message">Preparing the harbour and its cargo…</p></div>
   <noscript>This harbour needs JavaScript and a browser with WebGL 2 support.</noscript>
   <script type="module">
@@ -515,7 +526,7 @@
           const base=containerBatches[i],near=containerDetailBatches[i];let count=0;
           slots.forEach((slot,j)=>{
             slotPosition.set(...slot.p).applyMatrix4(ship.matrixWorld);
-            const detailed=!slot.inTransit&&high&&slotPosition.distanceToSquared(camera.position)<75*75;
+            const detailed=!slot.inTransit&&high&&count<24&&(slot.row===0||slot.row===13||slot.tier>=4)&&slotPosition.distanceToSquared(camera.position)<60*60;
             base.setMatrixAt(j,(slot.inTransit||detailed)?hiddenMatrix:slot.matrix);
             if(detailed){near.setMatrixAt(count,slot.matrix);near.setColorAt(count,slot.tint);count++;}
           });
@@ -918,7 +929,7 @@
       function updateSimulation(dt){
         simulationTime+=dt;updateLoading(simulationTime);updateBoats(simulationTime);
         lighthouseBeam.rotation.y=simulationTime*.24;
-        if(simulationTime-lastShadowUpdate>(quality==='high'?.12:.3)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
+        if(simulationTime-lastShadowUpdate>(quality==='high'?.25:.6)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
       }
 
       const composer=new EffectComposer(renderer);
@@ -1000,7 +1011,7 @@
         const previous=environment;environment=next;scene.environment=next.texture;previous.dispose();
       }
       function updateNightLights(){
-        floodLights.forEach((light,i)=>{light.intensity=nightAmount*(i<3||quality==='high'?15000:0);});
+        floodLights.forEach((light,i)=>{light.intensity=nightAmount*(i<3||quality==='high'?15000:0);light.visible=light.intensity>0;});
         beacon.intensity=nightAmount*3200;beamMaterial.uniforms.strength.value=nightAmount;
         lighthouseBeam.visible=nightAmount>.01;
       }
@@ -1052,7 +1063,136 @@
       setTimeOfDay(savedTime,false);
 
       qualitySelect.addEventListener('change',()=>{setQuality(qualitySelect.value);updateNightLights();});
-      document.querySelector('#reset').addEventListener('click',resetView);
+      // Phase 6 — cameras, accessible input and entirely synthesized harbour audio.
+      let cameraMode='orbit',yaw=0,pitch=0,tourTime=0,tourBlend=0,looking=false;
+      const pressed=new Set(),lookEuler=new THREE.Euler(0,0,0,'YXZ'),moveVector=new THREE.Vector3(),forwardVector=new THREE.Vector3(),rightVector=new THREE.Vector3();
+      const tourStart=new THREE.Vector3(),tourStartLook=new THREE.Vector3(),tourPoint=new THREE.Vector3(),tourLook=new THREE.Vector3();
+      const tourPath=new THREE.CatmullRomCurve3([[-150,65,250],[-90,65,60],[-100,68,-240],[180,95,-320],[380,75,140],[120,90,290],[-180,50,280]].map(p=>new THREE.Vector3(...p)),true,'centripetal');
+      const tourTargets=new THREE.CatmullRomCurve3([[34,18,60],[60,35,-40],[160,12,-140],[240,12,-100],[333,7,128],[60,30,65],[-220,16,196]].map(p=>new THREE.Vector3(...p)),true,'centripetal');
+      const cameraSelect=document.querySelector('#camera-mode'),cameraHelp=document.querySelector('#camera-help');
+      function showNotice(message){const el=document.querySelector('#status');el.textContent=message;el.style.display='block';clearTimeout(showNotice.timer);showNotice.timer=setTimeout(()=>el.style.display='none',5000);}
+      function setCameraMode(mode){
+        if(!['orbit','drone','walk','tour'].includes(mode))return;
+        pressed.clear();looking=false;if(document.pointerLockElement===canvas)document.exitPointerLock();
+        if(controls.enabled){controls.enableDamping=false;controls.update();controls.enableDamping=true;}
+        cameraMode=mode;cameraSelect.value=mode;controls.enabled=mode==='orbit';
+        if(mode==='walk'){camera.position.set(70,4.75,200);camera.lookAt(70,4.75,0);}
+        if(mode==='orbit'){
+          camera.getWorldDirection(forwardVector);controls.target.copy(camera.position).addScaledVector(forwardVector,80);controls.cursor.copy(controls.target);controls.update();
+        }
+        if(mode==='tour'){
+          tourTime=0;tourBlend=0;tourStart.copy(camera.position);camera.getWorldDirection(forwardVector);tourStartLook.copy(camera.position).addScaledVector(forwardVector,100);
+        }
+        lookEuler.setFromQuaternion(camera.quaternion,'YXZ');yaw=lookEuler.y;pitch=lookEuler.x;
+        document.querySelector('#touch-move').hidden=mode!=='walk'&&mode!=='drone';
+        document.querySelectorAll('[data-vertical]').forEach(el=>el.hidden=mode!=='drone');
+        const help={orbit:'Drag to orbit · Scroll to zoom · Right-drag to pan',drone:'WASD to fly · Q/E down/up · Shift faster · Click or drag to look · Esc releases mouse',walk:'WASD along the quay · Shift faster · Click or drag to look · Esc releases mouse',tour:'A three-minute harbour tour · Select another camera to take control'};
+        cameraHelp.textContent=help[mode];canvas.setAttribute('aria-label',help[mode]);canvas.focus({preventScroll:true});
+      }
+      cameraSelect.addEventListener('change',()=>setCameraMode(cameraSelect.value));
+      function editable(target){return target instanceof Element&&!!target.closest('input,select,textarea,[contenteditable=true]');}
+      window.addEventListener('keydown',event=>{
+        if(editable(event.target)||cameraMode==='orbit'||cameraMode==='tour')return;
+        if(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code)){pressed.add(event.code);event.preventDefault();}
+      });
+      window.addEventListener('keyup',event=>pressed.delete(event.code));
+      window.addEventListener('blur',()=>{pressed.clear();looking=false;});
+      document.addEventListener('pointerlockchange',()=>{pressed.clear();looking=document.pointerLockElement===canvas;});
+      canvas.addEventListener('pointerdown',event=>{
+        if(cameraMode!=='drone'&&cameraMode!=='walk')return;
+        looking=true;canvas.focus({preventScroll:true});
+        if(event.pointerType==='mouse'&&canvas.requestPointerLock){
+          try{const request=canvas.requestPointerLock();request?.catch(()=>showNotice('Drag the scene to look around.'));}catch{showNotice('Drag the scene to look around.');}
+        }else canvas.setPointerCapture(event.pointerId);
+      });
+      canvas.addEventListener('pointermove',event=>{
+        if((cameraMode!=='drone'&&cameraMode!=='walk')||(!looking&&document.pointerLockElement!==canvas))return;
+        yaw-=event.movementX*.0025;pitch=THREE.MathUtils.clamp(pitch-event.movementY*.0025,-1.45,1.45);
+      });
+      canvas.addEventListener('pointerup',()=>{if(document.pointerLockElement!==canvas)looking=false;});
+      canvas.addEventListener('pointercancel',()=>{looking=false;pressed.clear();});
+      document.querySelectorAll('[data-move]').forEach(button=>{
+        button.addEventListener('pointerdown',event=>{pressed.add(button.dataset.move);button.setPointerCapture(event.pointerId);event.preventDefault();});
+        for(const type of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(type,()=>pressed.delete(button.dataset.move));
+      });
+      const has=(...keys)=>keys.some(key=>pressed.has(key));
+      function updateCamera(dt){
+        if(cameraMode==='orbit'){controls.update();return;}
+        if(cameraMode==='tour'){
+          tourTime+=dt;tourBlend=Math.min(1,tourBlend+dt/3);const u=(tourTime/180)%1;
+          tourPath.getPointAt(u,tourPoint);tourTargets.getPointAt(u,tourLook);
+          camera.position.lerpVectors(tourStart,tourPoint,ease(tourBlend));tourLook.lerpVectors(tourStartLook,tourLook,ease(tourBlend));camera.lookAt(tourLook);return;
+        }
+        camera.quaternion.setFromEuler(lookEuler.set(pitch,yaw,0,'YXZ'));
+        camera.getWorldDirection(forwardVector);if(cameraMode==='walk'){forwardVector.y=0;forwardVector.normalize();}
+        rightVector.set(Math.cos(yaw),0,-Math.sin(yaw));moveVector.set(0,0,0);
+        moveVector.addScaledVector(forwardVector,Number(has('KeyW','ArrowUp'))-Number(has('KeyS','ArrowDown')));
+        moveVector.addScaledVector(rightVector,Number(has('KeyD','ArrowRight'))-Number(has('KeyA','ArrowLeft')));
+        if(cameraMode==='drone')moveVector.y+=Number(has('KeyE'))-Number(has('KeyQ'));
+        if(moveVector.lengthSq()>0){moveVector.normalize();camera.position.addScaledVector(moveVector,dt*(cameraMode==='walk'?3.4:32)*(has('ShiftLeft','ShiftRight')?2.8:1));}
+        if(cameraMode==='walk'){
+          // The clear waterside footpath avoids water, crane legs, rail bogies and traffic lanes.
+          camera.position.x=THREE.MathUtils.clamp(camera.position.x,68.5,71.5);camera.position.z=THREE.MathUtils.clamp(camera.position.z,-290,290);camera.position.y=4.75;
+        }else{
+          camera.position.x=THREE.MathUtils.clamp(camera.position.x,-1400,1400);camera.position.z=THREE.MathUtils.clamp(camera.position.z,-1400,1400);camera.position.y=THREE.MathUtils.clamp(camera.position.y,4.8,500);
+        }
+      }
+
+      const sound={context:null,master:null,analyser:null,muted:true,voices:new Set(),timer:null,nextGull:0,nextHorn:0,nextBeep:0,motorGain:null};
+      function audioEnvelope(context,gain,at,level,duration){gain.gain.setValueAtTime(0,at);gain.gain.linearRampToValueAtTime(level,at+.08);gain.gain.exponentialRampToValueAtTime(.0001,at+duration);}
+      function synthTone(frequency,duration,level,type='sine',pan=0,glide=frequency){
+        const ctx=sound.context,at=ctx.currentTime,osc=ctx.createOscillator(),gain=ctx.createGain(),panner=ctx.createStereoPanner();
+        osc.type=type;osc.frequency.setValueAtTime(frequency,at);osc.frequency.exponentialRampToValueAtTime(glide,at+duration*.65);panner.pan.value=pan;
+        audioEnvelope(ctx,gain,at,level,duration);osc.connect(gain);gain.connect(panner);panner.connect(sound.master);sound.voices.add(osc);
+        osc.onended=()=>{sound.voices.delete(osc);osc.disconnect();gain.disconnect();panner.disconnect();};osc.start(at);osc.stop(at+duration+.04);
+      }
+      function startAudioGraph(){
+        const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw new Error('Web Audio unavailable');
+        const ctx=new Audio();sound.context=ctx;sound.master=ctx.createGain();sound.master.gain.value=0;
+        const compressor=ctx.createDynamicsCompressor();compressor.threshold.value=-20;compressor.ratio.value=5;
+        sound.analyser=ctx.createAnalyser();sound.analyser.fftSize=512;
+        sound.master.connect(compressor);compressor.connect(sound.analyser);sound.analyser.connect(ctx.destination);
+        const buffer=ctx.createBuffer(1,ctx.sampleRate*4,ctx.sampleRate),data=buffer.getChannelData(0);let filtered=0;
+        for(let i=0;i<data.length;i++){filtered=(filtered+(random()*2-1)*.06)/1.025;data[i]=filtered*3;}
+        const surf=ctx.createBufferSource();surf.buffer=buffer;surf.loop=true;
+        const filter=ctx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=900;
+        const waveGain=ctx.createGain();waveGain.gain.value=.45;surf.connect(filter);filter.connect(waveGain);waveGain.connect(sound.master);surf.start();
+        const swell=ctx.createOscillator(),swellGain=ctx.createGain();swell.frequency.value=.085;swellGain.gain.value=.19;swell.connect(swellGain);swellGain.connect(waveGain.gain);swell.start();
+        const motor=ctx.createOscillator(),motorFilter=ctx.createBiquadFilter();motor.type='sawtooth';motor.frequency.value=62;motorFilter.type='lowpass';motorFilter.frequency.value=180;
+        sound.motorGain=ctx.createGain();sound.motorGain.gain.value=0;motor.connect(motorFilter);motorFilter.connect(sound.motorGain);sound.motorGain.connect(sound.master);motor.start();
+        sound.nextGull=ctx.currentTime+2;sound.nextHorn=ctx.currentTime+9;
+        sound.timer=setInterval(()=>{
+          if(sound.muted||document.hidden||ctx.state!=='running')return;
+          const now=ctx.currentTime;
+          if(now>sound.nextGull){synthTone(1300+random()*500,.65,.055,'sine',random()*1.6-.8,650+random()*400);sound.nextGull=now+5+random()*8;}
+          if(now>sound.nextHorn){synthTone(73,3.7,.11,'triangle',-.35,70);synthTone(110,3.4,.045,'sine',-.35,105);sound.nextHorn=now+30+random()*25;}
+          const handling=craneLoads.some(load=>load.state==='truck delivery');
+          if(handling&&now>sound.nextBeep){synthTone(870,.17,.04,'sine',.4);sound.nextBeep=now+1.2;}
+          const distance=Math.hypot(camera.position.x-85,camera.position.z),moving=craneLoads.some(load=>['lift','transfer','hoist clear'].includes(load.state));
+          sound.motorGain.gain.setTargetAtTime(moving?.12/(1+distance/130):.015,now,.4);
+        },250);
+      }
+      async function setMuted(muted){
+        if(!muted&&!sound.context)startAudioGraph();sound.muted=muted;
+        if(sound.context){
+          if(muted){sound.master.gain.cancelScheduledValues(sound.context.currentTime);sound.master.gain.setValueAtTime(0,sound.context.currentTime);for(const voice of sound.voices){try{voice.stop();}catch{}}await sound.context.suspend();}
+          else{await sound.context.resume();sound.master.gain.setTargetAtTime(.32,sound.context.currentTime,.15);}
+        }
+        const button=document.querySelector('#sound');button.textContent=muted?'Sound off':'Sound on';button.setAttribute('aria-pressed',String(!muted));button.setAttribute('aria-label',muted?'Enable ambient sound':'Mute ambient sound');
+      }
+      document.querySelector('#sound').addEventListener('click',()=>setMuted(!sound.muted).catch(()=>{sound.muted=true;showNotice('Audio could not start. Try the sound button again in a supported browser.');}));
+      document.addEventListener('visibilitychange',()=>{
+        pressed.clear();looking=false;
+        if(sound.context){if(document.hidden)sound.context.suspend();else if(!sound.muted)sound.context.resume().catch(()=>{});}
+      });
+      // Static mesh transforms are baked once. Moving groups and instance matrices remain live.
+      scene.traverse(object=>{if(object.isMesh){object.updateMatrix();object.matrixAutoUpdate=false;}});
+      for(const sea of Object.values(waters)){
+        const reflect=sea.onBeforeRender;let reflected=false;
+        sea.onBeforeRender=function(...args){if(quality==='low'&&reflected&&frameCount%2===1)return;reflect.apply(this,args);reflected=true;};
+      }
+
+      document.querySelector('#reset').addEventListener('click',()=>{setCameraMode('orbit');resetView();});
       document.querySelector('#fullscreen').addEventListener('click',async()=>{
         try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}
         catch{const s=document.querySelector('#status');s.textContent='Fullscreen is unavailable in this browser view.';s.style.display='block';setTimeout(()=>s.style.display='none',4000);}
@@ -1062,18 +1202,19 @@
       canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();renderer.setAnimationLoop(null);fail(new Error('WebGL context lost'));});
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
-      const metrics={phase:5,quality,frames:0,drawCalls:0,triangles:0};
+      const metrics={phase:6,quality,frames:0,drawCalls:0,triangles:0,fps:0};let frameAverage=1/60;
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?1024:512,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,cameraMode,audioMuted:sound.muted,audioState:sound.context?.state||'not started',audioVoices:sound.voices.size,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
       renderer.setAnimationLoop(()=>{
-        const dt=Math.min(clock.getDelta(),.05);
+        const elapsed=clock.getDelta(),dt=Math.min(elapsed,.05);
+        if(elapsed>0){frameAverage=frameAverage*.95+elapsed*.05;metrics.fps=Math.round(1/frameAverage);}
         if(document.hidden)return;
         updateSimulation(dt);
         seaTime+=dt*.38;water.material.uniforms.time.value=seaTime;
-        controls.update();
+        updateCamera(dt);
         // Keep the camera above sea level and above the quay when zooming close.
         const overQuay=camera.position.x>59&&camera.position.x<241&&Math.abs(camera.position.z)<301;
-        camera.position.y=Math.max(camera.position.y,overQuay?5:1.8);
+        if(cameraMode==='orbit')camera.position.y=Math.max(camera.position.y,overQuay?5:1.8);
         updateContainerDetail(quality==='high');
         renderer.info.reset();
         composer.render();
