@@ -80,7 +80,7 @@
     <div class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 22h20l-5 5H11zM11 7v12m10-12v12M8 11h16M16 4v18"/></svg></div>
     <div><div class="eyebrow">Halvard · North Terminal</div><h1>Aurora Strait</h1></div>
   </header>
-  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Living harbour / 06</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
+  <aside class="conditions"><div class="eyebrow"><span class="dot"></span>Halvard / Live</div><div class="weather">DAYLIGHT &nbsp; / &nbsp; CALM SEA</div></aside>
   <section class="time-control" aria-label="Time of day">
     <label for="time" id="time-label">12:00 · DAYLIGHT</label>
     <input id="time" type="range" min="5" max="23" step="0.05" value="12" aria-label="Time of day">
@@ -88,7 +88,7 @@
   </section>
   <div id="status" role="status" aria-live="polite"></div>
   <footer class="bottom">
-    <div class="caption"><strong>Halvard. The working waterfront.</strong><span id="camera-help">Drag to orbit · Scroll to zoom · Right-drag to pan</span></div>
+    <div class="caption"><strong>Aurora Strait · Berth 01</strong><span id="camera-help">Drag to orbit · Scroll to zoom · Right-drag to pan</span></div>
     <nav class="toolbar" aria-label="Scene controls">
       <label class="sr-only" for="camera-mode">Camera mode</label><select id="camera-mode" aria-label="Camera mode"><option value="orbit">Orbit</option><option value="drone">Drone</option><option value="walk">Walk</option><option value="tour">Cinematic tour</option></select>
       <div class="divider"></div>
@@ -127,11 +127,12 @@
       }
     }
     try {
-      const [THREE, { OrbitControls }, { Water }, { Sky }, { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
+      const [THREE, { OrbitControls }, { Water }, { Sky }, { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }, { ShaderPass }, { FXAAShader }] = await Promise.all([
         import('three'), import('three/addons/controls/OrbitControls.js'),
         import('three/addons/objects/Water.js'), import('three/addons/objects/Sky.js'),
         import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
-        import('three/addons/postprocessing/UnrealBloomPass.js'), import('three/addons/postprocessing/OutputPass.js')
+        import('three/addons/postprocessing/UnrealBloomPass.js'), import('three/addons/postprocessing/OutputPass.js'),
+        import('three/addons/postprocessing/ShaderPass.js'), import('three/addons/shaders/FXAAShader.js')
       ]);
       const canvas = document.querySelector('#scene');
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: !safeMode, powerPreference: safeMode?'default':'high-performance' });
@@ -146,7 +147,7 @@
       renderer.shadowMap.needsUpdate = true;
       const scene = new THREE.Scene();
       scene.fog = new THREE.FogExp2(0xb6cdd0, 0.00029);
-      const camera = new THREE.PerspectiveCamera(48, innerWidth / innerHeight, 0.6, 16000);
+      const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.6, 16000);
       const controls = new OrbitControls(camera, canvas);
       controls.enableDamping = true;
       controls.dampingFactor = 0.065;
@@ -160,9 +161,9 @@
       function resetView() {
         // Drain any orbit inertia before restoring a deterministic home pose.
         controls.enableDamping=false;controls.update();
-        camera.position.set(-440, 265, 565);
-        controls.target.set(100, 15, -20);
-        controls.cursor.set(100, 15, -20);
+        camera.position.set(...(innerWidth/innerHeight<.8?[-355,205,430]:[-285,145,355]));
+        controls.target.set(65, 18, -12);
+        controls.cursor.set(65, 18, -12);
         controls.update();
         controls.enableDamping=true;
       }
@@ -194,7 +195,7 @@
           g.addColorStop(0, '#58605b0c'); g.addColorStop(1, '#58605b00');
           ctx.fillStyle = g; ctx.fillRect(x-r,y-r,r*2,r*2);
         }
-        ctx.strokeStyle = '#545d5980'; ctx.lineWidth = 4;
+        ctx.strokeStyle = '#545d5948'; ctx.lineWidth = 2;
         for (let i = 0; i <= 4; i++) {
           ctx.beginPath(); ctx.moveTo(i*w/4,0); ctx.lineTo(i*w/4,h); ctx.stroke();
           ctx.beginPath(); ctx.moveTo(0,i*h/4); ctx.lineTo(w,i*h/4); ctx.stroke();
@@ -272,23 +273,61 @@
       sun.castShadow=true;
       sun.shadow.mapSize.set(2048,2048);
       Object.assign(sun.shadow.camera,{left:-420,right:420,top:420,bottom:-420,near:50,far:1600});
-      sun.shadow.normalBias=.12;sun.shadow.bias=-.00015;sun.shadow.radius=3;
+      sun.shadow.normalBias=.07;sun.shadow.bias=-.00015;sun.shadow.radius=3;
       scene.add(sun,sun.target,new THREE.HemisphereLight(0xddeff5,0x69776a,1.3));
 
-      // Official Water addon: a reflected scene render, sun glitter, animated normal layers.
-      // Keep both reflection targets allocated so quality switches never leak resources.
-      const waterGeometry = new THREE.PlaneGeometry(24000,24000);
+      // Deep-water dispersion: the renderer and buoyancy solver share amplitudes,
+      // wave numbers and angular frequencies (omega² = g k, metres and seconds).
+      const gravity=9.81;
+      const swellWaves=[
+        {a:.105,k:2*Math.PI/36,dx:.86,dz:.5103,phase:.3},
+        {a:.060,k:2*Math.PI/18,dx:-.25,dz:.96825,phase:1.7},
+        {a:.025,k:2*Math.PI/9.2,dx:.5,dz:-.866025,phase:3.1}
+      ];
+      for(const wave of swellWaves)wave.omega=Math.sqrt(gravity*wave.k);
+      function seaHeight(x,z,time){
+        let h=.02;for(const w of swellWaves)h+=w.a*Math.sin(w.k*(w.dx*x+w.dz*z)-w.omega*time+w.phase);return h;
+      }
+      const waveGLSL=`
+        vec3 seaField(vec2 p,float t){
+          vec3 field=vec3(0.0);
+          ${swellWaves.map(w=>`{float phase=${w.k.toFixed(8)}*dot(p,vec2(${w.dx.toFixed(7)},${w.dz.toFixed(7)}))-${w.omega.toFixed(8)}*t+${w.phase.toFixed(7)};
+          field.x+=${w.a.toFixed(7)}*sin(phase);field.yz+=${(w.a*w.k).toFixed(8)}*cos(phase)*vec2(${w.dx.toFixed(7)},${w.dz.toFixed(7)});}`).join('\n')}
+          return field;
+        }`;
+      // Concentric grid gives the near harbour actual wave displacement without
+      // spending fine triangles at the horizon. No third-party geometry assets.
+      const seaSegments=safeMode?96:160,seaRings=safeMode?64:112,seaVertices=[-90,0,0],seaIndices=[];
+      for(let j=1;j<=seaRings;j++){
+        const radius=j<seaRings*.76?j*7:seaRings*.76*7+Math.pow((j-seaRings*.76)/(seaRings*.24),2)*16500;
+        for(let i=0;i<seaSegments;i++){const a=i/seaSegments*Math.PI*2;seaVertices.push(-90+Math.cos(a)*radius,Math.sin(a)*radius,0);}
+      }
+      for(let i=0;i<seaSegments;i++)seaIndices.push(0,1+i,1+(i+1)%seaSegments);
+      for(let j=1;j<seaRings;j++)for(let i=0;i<seaSegments;i++){
+        const a=1+(j-1)*seaSegments+i,b=1+(j-1)*seaSegments+(i+1)%seaSegments,c=a+seaSegments,d=b+seaSegments;
+        seaIndices.push(a,c,b,b,c,d);
+      }
+      const waterGeometry=new THREE.BufferGeometry();waterGeometry.setAttribute('position',new THREE.Float32BufferAttribute(seaVertices,3));waterGeometry.setIndex(seaIndices);waterGeometry.computeVertexNormals();
       const waters = {};
       for(const [quality,size] of [['high',safeMode?512:1024],['low',safeMode?256:512]]){
         const sea=new Water(waterGeometry,{textureWidth:size,textureHeight:size,waterNormals,
-          sunDirection,sunColor:0xfff2d8,waterColor:0x146560,distortionScale:2.2,fog:true});
+          sunDirection,sunColor:0xfff2d8,waterColor:0x10575b,distortionScale:.7,fog:true});
         sea.rotation.x=-Math.PI/2;sea.position.y=.02;
-        sea.material.uniforms.size.value=4;
-        // Water's artistic default F0 is .3; use a calmer, more physical .065.
-        sea.material.fragmentShader=sea.material.fragmentShader
-          .replace('float rf0 = 0.3;', 'float rf0 = 0.065;')
-          .replace('sunColor * diffuseLight * 0.3', 'waterColor * diffuseLight * 0.7');
-        sea.visible=false;scene.add(sea);waters[quality]=sea;
+        sea.material.uniforms.size.value=1.25;
+        sea.material.vertexShader=waveGLSL+sea.material.vertexShader
+          .replace('worldPosition = mirrorCoord.xyzw;',`mirrorCoord.y += seaField(mirrorCoord.xz,time).x;worldPosition = mirrorCoord.xyzw;`)
+          .replace('vec4 mvPosition =  modelViewMatrix * vec4( position, 1.0 );','vec4 mvPosition = viewMatrix * worldPosition;');
+        sea.material.fragmentShader=waveGLSL+sea.material.fragmentShader
+          .replace('vec3 surfaceNormal = normalize( noise.xzy * vec3( 1.5, 1.0, 1.5 ) );',`vec3 field=seaField(worldPosition.xz,time);
+            vec3 surfaceNormal=normalize(vec3(-field.y,1.0,-field.z)+vec3(noise.x,0.0,noise.y)*0.38);`)
+          .replace('float rf0 = 0.3;', 'float rf0 = 0.025;')
+          .replace('sunColor * diffuseLight * 0.3','waterColor * (0.32 + diffuseLight * 0.5)')
+          .replace('sunLight( surfaceNormal, eyeDirection, 100.0, 2.0, 0.5','sunLight( surfaceNormal, eyeDirection, 320.0, 1.1, 0.5')
+          .replace('vec3 outgoingLight = albedo;',`float coastal=exp(-abs(worldPosition.x-60.0)*.045)*step(abs(worldPosition.z),310.0);
+            vec3 outgoingLight=albedo+waterColor*coastal*.09;`);
+        // Fog must be mixed in linear light before the output transform.
+        sea.material.fragmentShader=sea.material.fragmentShader.replace('#include <fog_fragment>','').replace('#include <tonemapping_fragment>','#include <fog_fragment>\n#include <tonemapping_fragment>');
+        sea.visible=false;sea.frustumCulled=false;scene.add(sea);waters[quality]=sea;
       }
 
       const unitBox = new THREE.BoxGeometry(1,1,1);
@@ -314,7 +353,17 @@
       box(180,4.8,600,new THREE.MeshStandardMaterial({color:0x858c82,roughness:1}),150,.5,0);
       const apron=new THREE.Mesh(new THREE.PlaneGeometry(180,600),concreteMat);
       apron.rotation.x=-Math.PI/2;apron.position.set(150,3.015,0);apron.receiveShadow=true;scene.add(apron);
-      const serviceLane=new THREE.Mesh(new THREE.PlaneGeometry(44,596),new THREE.MeshStandardMaterial({color:0x676b64,map:concrete,roughness:1,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+      const asphalt=canvasTexture(1024,1024,(ctx,w,h)=>{
+        ctx.fillStyle='#6a706c';ctx.fillRect(0,0,w,h);
+        for(let i=0;i<65000;i++){const v=65+random()*90;ctx.fillStyle=`rgba(${v},${v+3},${v},.22)`;ctx.fillRect(random()*w,random()*h,1+random()*2,1+random()*2);}
+        ctx.lineCap='round';
+        for(let i=0;i<24;i++){
+          ctx.strokeStyle='#29312d0c';ctx.lineWidth=5+random()*9;const x=random()*w;
+          ctx.beginPath();ctx.moveTo(x,0);ctx.bezierCurveTo(x-15,350,x+20,700,x+4,h);ctx.stroke();
+        }
+      });asphalt.repeat.set(2,16);
+      const asphaltMaterial=new THREE.MeshStandardMaterial({color:0x9caaa4,map:asphalt,bumpMap:asphalt,bumpScale:.025,roughness:.96,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+      const serviceLane=new THREE.Mesh(new THREE.PlaneGeometry(44,596),asphaltMaterial);
       serviceLane.rotation.x=-Math.PI/2;serviceLane.position.set(124,3.025,0);serviceLane.receiveShadow=true;scene.add(serviceLane);
       const quayWall=new THREE.Mesh(new THREE.PlaneGeometry(600,5.2),wallMat);
       quayWall.rotation.y=-Math.PI/2;quayWall.position.set(59.98,.4,0);quayWall.receiveShadow=true;scene.add(quayWall);
@@ -362,11 +411,13 @@
 
       // Phase 2 — Aurora Strait. Ship-local coordinates keep future swell animation coherent.
       const ship = new THREE.Group(); ship.name='Aurora Strait';ship.position.x=34;scene.add(ship);
-      const steel=new THREE.MeshStandardMaterial({color:0x171e20,metalness:.58,roughness:.68});
+      const steel=new THREE.MeshStandardMaterial({color:0x171e20,metalness:.3,roughness:.56});
       const redSteel=new THREE.MeshStandardMaterial({color:0x74291f,metalness:.28,roughness:.8});
       const deckSteel=new THREE.MeshStandardMaterial({color:0x535d54,metalness:.32,roughness:.82});
-      const whiteSteel=new THREE.MeshStandardMaterial({color:0xe8e4d5,metalness:.12,roughness:.66});
+      const whiteSteel=new THREE.MeshStandardMaterial({color:0xd9ddd6,metalness:.12,roughness:.56});
       const tealSteel=new THREE.MeshStandardMaterial({color:0x215e61,metalness:.4,roughness:.57});
+      const portNavigation=new THREE.MeshStandardMaterial({color:0xcd362b,emissive:0xff2318,emissiveIntensity:2,roughness:.3});
+      const starboardNavigation=new THREE.MeshStandardMaterial({color:0x259e72,emissive:0x1dff92,emissiveIntensity:2,roughness:.3});
       const glass=new THREE.MeshStandardMaterial({color:0x12333e,metalness:.65,roughness:.18});
       const shipBox=(w,h,d,mat,x,y,z)=>box(w,h,d,mat,x,y,z,ship);
       const shipInstances=(geo,mat,ts,cast=true)=>instances(geo,mat,ts,cast,ship);
@@ -430,7 +481,8 @@
           ctx.fillStyle='#00000024';ctx.fillRect(x,0,4,160);
           ctx.fillStyle='#ffffff16';ctx.fillRect(x+4,0,2,160);
         }
-        ctx.fillStyle='#00000030';ctx.fillRect(0,0,768,5);ctx.fillRect(0,155,768,5);
+        ctx.fillStyle='#00000040';ctx.fillRect(0,0,768,3);ctx.fillRect(0,156,768,4);
+        const bottomShade=ctx.createLinearGradient(0,130,0,160);bottomShade.addColorStop(0,'#00000000');bottomShade.addColorStop(1,'#18211c35');ctx.fillStyle=bottomShade;ctx.fillRect(0,130,768,30);
         ctx.fillRect(0,0,6,160);ctx.fillRect(762,0,6,160);
         ctx.fillStyle=line.ink;ctx.textAlign='center';ctx.textBaseline='middle';
         ctx.font=`italic bold ${line.name.length>7?43:58}px sans-serif`;ctx.fillText(line.name,395,77);
@@ -440,7 +492,7 @@
         ctx.font='9px monospace';ctx.textAlign='left';ctx.fillText(line.code+'  481 216  /  45G1',18,139);
         ctx.fillText('INTERNATIONAL CONTAINER TRANSPORT',220,118);
         // Roof panel: narrow longitudinal ribs and recessed top rails.
-        for(let x=0;x<768;x+=16){ctx.fillStyle='#00000024';ctx.fillRect(x,256,4,256);ctx.fillStyle='#ffffff14';ctx.fillRect(x+4,256,2,256);}
+        for(let x=0;x<768;x+=16){ctx.fillStyle='#00000013';ctx.fillRect(x,256,4,256);ctx.fillStyle='#ffffff0c';ctx.fillRect(x+4,256,2,256);}
         ctx.strokeStyle='#1f2b2945';ctx.lineWidth=6;ctx.strokeRect(4,260,760,248);
         // End doors: two leaves, seals, four zinc lock rods, hinges and warning placard.
         ctx.strokeStyle='#14252399';ctx.lineWidth=5;ctx.strokeRect(774,6,244,244);
@@ -556,6 +608,8 @@
       shipBox(38,4.3,12,whiteSteel,0,34.2,-124);
       shipBox(40,.65,14,whiteSteel,0,36.7,-124);
       shipBox(33,.45,24,deckSteel,0,32,-128);
+      shipInstances(new THREE.SphereGeometry(1,8,6),portNavigation,[{p:[-19.2,34.8,-117.6],s:[.18,.22,.18]}],false);
+      shipInstances(new THREE.SphereGeometry(1,8,6),starboardNavigation,[{p:[19.2,34.8,-117.6],s:[.18,.22,.18]}],false);
       const cabinWindows=[],ledges=[];
       for(const y of [17,21,25,29]){
         for(let x=-10;x<=10;x+=4)for(const z of [-116.94,-139.06])cabinWindows.push({p:[x,y,z],s:[1.45,1.35,.12]});
@@ -598,14 +652,15 @@
         rails.push(rod([-20,38,z],[20,38,z],.045));
       }
       shipInstances(cylinders,whiteSteel,rails);
-      const ropes=[];
+      const ropes=[],mooringSpecs=[];
       for(const [z,targetZ,x] of [[-142,-156,51],[-133,-108,54],[131,156,50],[145,132,45]]){
         const from=new THREE.Vector3(x,12.8+sheer(z),z),to=new THREE.Vector3(65,4,targetZ);
+        mooringSpecs.push({local:new THREE.Vector3(x-34,12.8+sheer(z),z),shore:to.clone(),rest:from.distanceTo(to)*1.07});
         const mid=from.clone().lerp(to,.5);mid.y-=2;
         const curve=new THREE.QuadraticBezierCurve3(from,mid,to).getPoints(20);
         for(let i=0;i<curve.length-1;i++)ropes.push(rod(curve[i].toArray(),curve[i+1].toArray(),.11));
       }
-      instances(cylinders,new THREE.MeshStandardMaterial({color:0xaa9670,roughness:1}),ropes);
+      const mooringMesh=instances(cylinders,new THREE.MeshStandardMaterial({color:0x8e7c58,roughness:1}),ropes);
       const deckGear=[];
       for(const x of [-7,7])for(const z of [141,155])deckGear.push({p:[x,14.7,z],s:[1.1,1.6,1.1]});
       shipInstances(cylinders,steel,deckGear);
@@ -636,18 +691,20 @@
 
       // One rugged volcanic mesh, instanced into a distant archipelago.
       const radial=96,rings=34,positions=[],colors=[],indices=[];
-      const rock=new THREE.Color(),sand=new THREE.Color(0x777d68),vegetation=new THREE.Color(0x405b50);
+      const rock=new THREE.Color(),sand=new THREE.Color(0x7c8170),vegetation=new THREE.Color(0x475b4c);
       for(let j=0;j<=rings;j++){
         const v=j/rings;
         for(let i=0;i<=radial;i++){
           const a=i/radial*Math.PI*2;
           const ridge=1+.085*Math.sin(a*5+.7)+.06*Math.sin(a*9-1)+.03*Math.sin(a*17);
           const r=Math.pow(v,.9)*ridge;
-          const height=Math.pow(1-v,1.48)*(1+.10*Math.sin(a*7+v*6)*Math.sin(v*Math.PI))-.025;
-          positions.push(Math.cos(a)*r,height,Math.sin(a)*r);
+          const ridgeNoise=.12*Math.sin(a*3+v*7)+.065*Math.sin(a*7-v*11)+.035*Math.sin(a*19+v*31);
+          const height=Math.pow(1-v,1.25)*(1+ridgeNoise*Math.sin(v*Math.PI))-.018;
+          const lean=.16*Math.pow(1-v,2);
+          positions.push(Math.cos(a)*r+lean,height,Math.sin(a)*r-lean*.5);
           rock.copy(vegetation).lerp(sand,Math.min(1,Math.pow(v,9)*.85+Math.max(0,Math.sin(a*9+v*30))*.20));
           colors.push(rock.r,rock.g,rock.b);
-          if(j<rings&&i<radial){const k=j*(radial+1)+i;indices.push(k,k+1,k+radial+1,k+1,k+radial+2,k+radial+1);}
+          if(j<rings&&i<radial){const k=j*(radial+1)+i;indices.push(k,k+radial+1,k+1,k+1,k+radial+1,k+radial+2);}
         }
       }
       const islandGeometry=new THREE.BufferGeometry();
@@ -655,10 +712,10 @@
       islandGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
       islandGeometry.setIndex(indices);islandGeometry.computeVertexNormals();
       instances(islandGeometry,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1}),[
-        {p:[-1550,0,-1750],s:[440,330,330],r:[0,.4,0]},
+        {p:[-1550,0,-1750],s:[440,235,330],r:[0,.4,0]},
         {p:[-900,0,-2000],s:[390,220,270],r:[0,1.5,0]},
-        {p:[-380,0,-1630],s:[260,310,280],r:[0,2,0]},
-        {p:[180,0,-2150],s:[400,340,330],r:[0,3,0]},
+        {p:[-380,0,-1630],s:[300,235,280],r:[0,2,0]},
+        {p:[180,0,-2150],s:[400,280,330],r:[0,3,0]},
         {p:[790,0,-1820],s:[420,230,280],r:[0,4,0]},
         {p:[1450,0,-2350],s:[430,360,390],r:[0,5,0]},
         {p:[-2050,0,-750],s:[380,200,330],r:[0,1,0]},
@@ -666,7 +723,7 @@
       ],false);
 
       // Phase 3 — terminal infrastructure. Repeated steelwork shares instanced batches.
-      const cranePaint=new THREE.MeshStandardMaterial({color:0x2c8587,metalness:.48,roughness:.6});
+      const cranePaint=new THREE.MeshStandardMaterial({color:0x276567,metalness:.32,roughness:.52});
       const orange=new THREE.MeshStandardMaterial({color:0xd8a139,metalness:.35,roughness:.65});
       const craneSteel=[],craneBraces=[],craneWheels=[],craneGlass=[],craneCables=[],spreaders=[];
       const craneStations=[-88.2,-37,1.4,52.6,103.8];
@@ -689,11 +746,10 @@
           craneCables.push(rod([83,67,z+dz],[3,52,z+dz],.075),rod([83,67,z+dz],[111,52,z+dz],.075));
         }
         craneSteel.push({p:[83,68,z],s:[2,1,9]});
-        craneSteel.push({p:[45,44.5,z+5],s:[4,3.5,3.2]});
-        craneGlass.push({p:[45,45,z+6.64],s:[3.4,1.9,.1]},{p:[42.94,45,z+5],s:[.1,1.9,2.8]});
+
       }
       instances(unitBox,cranePaint,craneSteel);instances(cylinders,cranePaint,craneBraces);
-      instances(cylinders,darkMat,craneWheels);instances(unitBox,glass,craneGlass,false);
+      instances(cylinders,darkMat,craneWheels);
       instances(cylinders,steel,craneCables,false);
 
       const yardManifest=lines.map(()=>[]);let yardContainerCount=0;
@@ -797,115 +853,222 @@
       const lantern=new THREE.Mesh(new THREE.CylinderGeometry(2.7,2.7,3.5,12),glass);lantern.position.y=21.5;lighthouse.add(lantern);
       const cap=new THREE.Mesh(new THREE.ConeGeometry(3.7,2.5,24),redSteel);cap.position.y=24.5;lighthouse.add(cap);
       instances(new THREE.CylinderGeometry(1,1,1,24),whiteSteel,[{p:[-220,22,196],s:[3.8,.5,3.8]},{p:[-220,25.3,196],s:[3.1,.4,3.1]}]);
-      const buoyBases=[],buoyPosts=[];
+      const buoyBases=[],buoyPosts=[],buoyBodies=[];
+      function buoyInstances(geometry,material,transforms){const mesh=instances(geometry,material,transforms);buoyBodies.push({mesh,transforms});return mesh;}
       for(const [x,z] of [[-125,280],[-130,75],[-140,-140],[-130,-350]]){
         buoyBases.push({p:[x,.5,z],s:[2.2,1.4,2.2]});buoyPosts.push({p:[x,3,z],s:[.35,4,.35]});
       }
-      instances(new THREE.ConeGeometry(1,1,12),redSteel,buoyBases);instances(cylinders,redSteel,buoyPosts);
-      instances(new THREE.ConeGeometry(1,1,12),tealSteel,[{p:[-70,.5,295],s:[2.2,1.4,2.2]},{p:[-65,.5,-355],s:[2.2,1.4,2.2]}]);
-      instances(cylinders,tealSteel,[{p:[-70,3,295],s:[.35,4,.35]},{p:[-65,3,-355],s:[.35,4,.35]}]);
+      buoyInstances(new THREE.ConeGeometry(1,1,12),redSteel,buoyBases);buoyInstances(cylinders,redSteel,buoyPosts);
+      buoyInstances(new THREE.ConeGeometry(1,1,12),tealSteel,[{p:[-70,.5,295],s:[2.2,1.4,2.2]},{p:[-65,.5,-355],s:[2.2,1.4,2.2]}]);
+      buoyInstances(cylinders,tealSteel,[{p:[-70,3,295],s:[.35,4,.35]},{p:[-65,3,-355],s:[.35,4,.35]}]);
 
-      // Phase 4 — deterministic simulation: one clock drives ownership, hoists and traffic.
-      const cycleDuration=76,craneBays=[1,5,8,12,16];
+      // Small-scale cues: soft contact dirt, walkway rails, ladders, doors and roof plant.
+      const contactTexture=canvasTexture(128,128,(ctx,w,h)=>{
+        const pixels=ctx.createImageData(w,h);
+        for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+          const edge=Math.max(Math.abs(x/w*2-1),Math.abs(y/h*2-1));
+          const alpha=(1-THREE.MathUtils.smoothstep(edge,.6,1))*.28,i=(y*w+x)*4;
+          pixels.data[i]=16;pixels.data[i+1]=24;pixels.data[i+2]=22;pixels.data[i+3]=alpha*255;
+        }ctx.putImageData(pixels,0,0);
+      });
+      const contactPads=[];
+      for(const x of [162,185,208])contactPads.push({p:[x,3.04,-131],s:[16,241,1],r:[-Math.PI/2,0,0]});
+      for(const z of [-190,-92,6])contactPads.push({p:[332,3.04,z],s:[101,72,1],r:[-Math.PI/2,0,0]});
+      contactPads.push({p:[294,3.04,204],s:[47,34,1],r:[-Math.PI/2,0,0]});
+      for(const z of craneStations)for(const x of [75,96])for(const dz of [-9,9])contactPads.push({p:[x,3.045,z+dz],s:[5,9,1],r:[-Math.PI/2,0,0]});
+      instances(new THREE.PlaneGeometry(1,1),new THREE.MeshBasicMaterial({map:contactTexture,transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2}),contactPads,false);
+      const detailRails=[],detailSteps=[],craneWalkways=[],exchangePads=[];
+      for(const z of craneStations){
+        craneWalkways.push({p:[56,47.7,z-4.6],s:[113,.16,1.1]});
+        for(const y of [48.35,49])detailRails.push(rod([0,y,z-5.1],[112,y,z-5.1],.035));
+        for(let x=0;x<=112;x+=4)detailRails.push(rod([x,47.8,z-5.1],[x,49,z-5.1],.035));
+        for(const dz of [-.4,.4])detailRails.push(rod([96.9,5,z-7+dz],[96.9,43,z-7+dz],.055));
+        for(let y=5;y<43;y+=.4)detailSteps.push({p:[97,y,z-7],s:[.09,.07,.85]});
+        exchangePads.push({p:[151,3.045,z],s:[3.2,.025,13.3]});
+      }
+      instances(cylinders,whiteSteel,detailRails,false);instances(unitBox,roofMetal,detailSteps,false);instances(unitBox,roofMetal,craneWalkways);
+      instances(unitBox,paintMat,exchangePads,false);
+      const warehousePanels=[],roofPlant=[];
+      for(const z of [-190,-92,6]){
+        for(let dz=-31;dz<=31;dz+=3)warehousePanels.push({p:[284.38,10,z+dz],s:[.12,12,.13]});
+        for(const x of [303,325,347,369])roofPlant.push({p:[x,17.5,z],s:[3.5,1.2,5]});
+      }
+      instances(unitBox,roofMetal,warehousePanels,false);instances(unitBox,roofMetal,roofPlant);
+      const containerHardware=[];
+      // Corner castings are represented in the shared atlas; add cast steel at
+      // the foreground deck's repeated twistlock positions, rather than a mesh per box.
+      for(let bay=0;bay<17;bay++)for(const x of [-17.6,17.6])containerHardware.push({p:[x,13.45,-101+bay*12.8],s:[.18,.3,.25]});
+      shipInstances(unitBox,roofMetal,containerHardware,false);
+
+      // Fixed-step dynamics in SI units. Cargo has exactly one visible owner through
+      // a reversible ship → hoist → truck → yard-hoist → pad transfer (no respawn).
+      const fixedStep=1/60,halfCycle=178,cycleDuration=halfCycle*2,craneBays=[1,5,8,12,16];
+      const ease=t=>{t=THREE.MathUtils.clamp(t,0,1);return THREE.MathUtils.clamp(t*t*t*(t*(t*6-15)+10),0,1);};
+      function blend(a,b,t){return THREE.MathUtils.lerp(a,b,ease(t));}
+      function spring(state,target,frequency,damping,h){
+        const w=frequency*2*Math.PI;state.velocity+=(w*w*(target-state.value)-2*damping*w*state.velocity)*h;state.value+=state.velocity*h;return state.value;
+      }
+      const shipHeave={value:seaHeight(34,0,0)*.45,velocity:0},shipRoll={value:0,velocity:0},shipPitch={value:0,velocity:0};
       const craneLoads=craneBays.map((bay,i)=>{
         const slot=containerSlots.filter(s=>s.bay===bay&&s.row===8).sort((a,b)=>b.tier-a.tier)[0];
-        const mesh=instances(containerCoarse,containerBatches[slot.line].material,[{p:[0,0,0]}]);
-        mesh.setColorAt(0,slot.tint);mesh.visible=false;
-        return {slot,mesh,state:'approach',owner:'ship',x:110,y:42,truck:new THREE.Vector3(110,0,slot.p[2]),heading:0};
+        const mesh=instances(containerCoarse,containerBatches[slot.line].material,[{p:[0,0,0]}]);mesh.setColorAt(0,slot.tint);mesh.visible=false;
+        return {slot,mesh,state:'approach',owner:'ship',x:110,y:42,truck:new THREE.Vector3(110,0,slot.p[2]),heading:0,
+          swing:{value:0,velocity:0},previousX:110,previousVelocity:0,sway:0,speed:0,wheelPhase:0,phase:0,initialized:false};
       });
       const hoistTrolleys=instances(unitBox,cranePaint,craneLoads.map(()=>({p:[0,0,0]})));
       const hoistSpreaders=instances(unitBox,orange,craneLoads.map(()=>({p:[0,0,0]})));
       const hoistRopes=instances(cylinders,steel,Array.from({length:20},()=>({p:[0,0,0]})),false);
+      const movingCabins=instances(unitBox,cranePaint,craneLoads.map(()=>({p:[0,0,0]})));
+      const movingCabinWindows=instances(unitBox,glass,Array.from({length:10},()=>({p:[0,0,0]})),false);
+      const yardSpreaders=instances(unitBox,orange,craneLoads.map(()=>({p:[0,0,0]})));
+      const yardHoistRopes=instances(cylinders,steel,Array.from({length:20},()=>({p:[0,0,0]})),false);
+      const yardTrolleys=instances(unitBox,orange,craneLoads.map(()=>({p:[0,0,0]})));
+      const exchangeSteel=[],exchangeWheels=[];
+      for(const load of craneLoads){
+        const z=load.slot.p[2];
+        for(const x of [135,155])for(const dz of [-8,8]){
+          exchangeSteel.push({p:[x,10.5,z+dz],s:[.5,13.6,.6]});exchangeWheels.push({p:[x,3.8,z+dz],s:[.7,.8,.7],r:[0,0,Math.PI/2]});
+        }
+        for(const dz of [-7,7])exchangeSteel.push({p:[145,17.5,z+dz],s:[21,1.1,.8]});
+      }
+      instances(unitBox,orange,exchangeSteel);instances(cylinders,darkMat,exchangeWheels);
       function writeInstance(mesh,index,p,s=[1,1,1],r=[0,0,0]){
         dummy.position.set(...p);dummy.scale.set(...s);dummy.rotation.set(...r);dummy.updateMatrix();mesh.setMatrixAt(index,dummy.matrix);
+      }
+      const ropeA=new THREE.Vector3(),ropeB=new THREE.Vector3(),ropeDir=new THREE.Vector3(),upAxis=new THREE.Vector3(0,1,0);
+      function writeRope(mesh,index,a,b,radius){
+        ropeA.set(...a);ropeB.set(...b);ropeDir.subVectors(ropeB,ropeA);const length=ropeDir.length();
+        dummy.position.copy(ropeA).add(ropeB).multiplyScalar(.5);dummy.scale.set(radius,Math.max(.01,length),radius);
+        dummy.quaternion.setFromUnitVectors(upAxis,ropeDir.divideScalar(length||1));dummy.updateMatrix();mesh.setMatrixAt(index,dummy.matrix);
       }
       const truckParts=[
         {geo:unitBox,mat:steel,parts:[{p:[0,4.4,0],s:[2.7,.5,13.2]},{p:[0,4.5,8],s:[2.6,.5,4]}]},
         {geo:unitBox,mat:whiteSteel,parts:[{p:[0,5.8,8.4],s:[2.6,2.6,3.2]}]},
-        {geo:unitBox,mat:glass,parts:[{p:[0,6.3,10.03],s:[2.25,1.1,.1]}]},
-        {geo:cylinders,mat:darkMat,parts:[-1.4,1.4].flatMap(x=>[-4.5,-2.8,6.9,9.3].map(z=>({p:[x,3.75,z],s:[.7,.45,.7],r:[0,0,Math.PI/2]})))}
+        {geo:unitBox,mat:glass,parts:[{p:[0,6.3,10.03],s:[2.25,1.1,.1]},{p:[-1.31,6.3,8.3],s:[.08,1,2.3]},{p:[1.31,6.3,8.3],s:[.08,1,2.3]}]},
+        {geo:cylinders,mat:darkMat,parts:[-1.4,1.4].flatMap(x=>[-4.5,-2.8,6.9,9.3].map(z=>({p:[x,3.75,z],s:[.7,.45,.7],r:[0,0,Math.PI/2],spin:true})))},
+        {geo:cylinders,mat:roofMetal,parts:[-1.65,1.65].flatMap(x=>[-4.5,-2.8,6.9,9.3].map(z=>({p:[x,3.75,z],s:[.33,.05,.33],r:[0,0,Math.PI/2],spin:true})))}
       ];
-      function dynamicVehicle(definitions,count){
-        return definitions.map(def=>({...def,mesh:instances(def.geo,def.mat,Array.from({length:def.parts.length*count},()=>({p:[0,0,0]})))}));
-      }
+      function dynamicVehicle(definitions,count){return definitions.map(def=>({...def,mesh:instances(def.geo,def.mat,Array.from({length:def.parts.length*count},()=>({p:[0,0,0]})))}));}
       const trucks=dynamicVehicle(truckParts,5);
-      const vehicleMatrix=new THREE.Matrix4(),partMatrix=new THREE.Matrix4(),vehicleQuaternion=new THREE.Quaternion(),axisY=new THREE.Vector3(0,1,0);
-      function placeVehicle(batches,index,position,heading){
-        vehicleQuaternion.setFromAxisAngle(axisY,heading);vehicleMatrix.compose(position,vehicleQuaternion,new THREE.Vector3(1,1,1));
+      const vehicleMatrix=new THREE.Matrix4(),partMatrix=new THREE.Matrix4(),vehicleQuaternion=new THREE.Quaternion(),wheelQuaternion=new THREE.Quaternion(),axisY=new THREE.Vector3(0,1,0),unitScale=new THREE.Vector3(1,1,1);
+      function placeVehicle(batches,index,position,heading,wheelAngle=0){
+        vehicleQuaternion.setFromAxisAngle(axisY,heading);vehicleMatrix.compose(position,vehicleQuaternion,unitScale);
         for(const batch of batches)batch.parts.forEach((part,j)=>{
-          dummy.position.set(...part.p);dummy.scale.set(...part.s);dummy.rotation.set(...(part.r||[0,0,0]));dummy.updateMatrix();
+          dummy.position.set(...part.p);dummy.scale.set(...part.s);dummy.rotation.set(...(part.r||[0,0,0]));
+          if(part.spin)dummy.quaternion.multiply(wheelQuaternion.setFromAxisAngle(axisY,wheelAngle));dummy.updateMatrix();
           partMatrix.multiplyMatrices(vehicleMatrix,dummy.matrix);batch.mesh.setMatrixAt(index*batch.parts.length+j,partMatrix);
         });
       }
       function finishVehicles(batches){for(const b of batches){b.mesh.instanceMatrix.needsUpdate=true;b.mesh.computeBoundingSphere();}}
       const truckPaths=craneLoads.map(load=>{
-        const z=load.slot.p[2];return new THREE.CatmullRomCurve3([[110,z],[110,z+15],[142,z+15],[142,z-15],[110,z-15]].map(([x,z])=>new THREE.Vector3(x,0,z)),true,'centripetal');
+        const z=load.slot.p[2],points=[[110,z],[110,z+12],[126,z+22],[142,z+12],[142,z]];
+        const outbound=new THREE.CatmullRomCurve3(points.map(([x,z])=>new THREE.Vector3(x,0,z)),false,'centripetal');
+        const inbound=new THREE.CatmullRomCurve3([[142,z],[142,z-12],[126,z-22],[110,z-12],[110,z]].map(([x,z])=>new THREE.Vector3(x,0,z)),false,'centripetal');
+        for(const path of [outbound,inbound]){path.arcLengthDivisions=1600;path.updateArcLengths();}
+        return {outbound,inbound,length:outbound.getLength()};
       });
       const carrierParts=[
         {geo:unitBox,mat:orange,parts:[{p:[0,11.5,0],s:[6,1,11]},...[-2.5,2.5].flatMap(x=>[-4.7,4.7].map(z=>({p:[x,7.7,z],s:[.45,7.3,.5]})))]},
         {geo:unitBox,mat:glass,parts:[{p:[2,11,4],s:[2,2,2]}]},
-        {geo:cylinders,mat:darkMat,parts:[-2.5,2.5].flatMap(x=>[-4.7,4.7].map(z=>({p:[x,4.1,z],s:[.95,.7,.95],r:[0,0,Math.PI/2]})))}
+        {geo:cylinders,mat:darkMat,parts:[-2.5,2.5].flatMap(x=>[-4.7,4.7].map(z=>({p:[x,4.1,z],s:[.95,.7,.95],r:[0,0,Math.PI/2],spin:true})))}
       ];
       const carriers=dynamicVehicle(carrierParts,3);
       const carrierPath=new THREE.CatmullRomCurve3([[228,-260],[228,115],[236,132],[252,132],[260,115],[260,-260],[252,-278],[236,-278]].map(([x,z])=>new THREE.Vector3(x,0,z)),true,'centripetal');
-      const cargoPoint=new THREE.Vector3(),truckTangent=new THREE.Vector3();
-      const ease=t=>{t=THREE.MathUtils.clamp(t,0,1);return t*t*(3-2*t);};
-      function blend(a,b,t){return THREE.MathUtils.lerp(a,b,ease(t));}
-      function updateLoading(time){
+      carrierPath.arcLengthDivisions=2048;carrierPath.updateArcLengths();
+      const carrierStates=Array.from({length:3},(_,i)=>({distance:carrierPath.getLength()*i/3,speed:0,wheelPhase:0}));
+      const cargoPoint=new THREE.Vector3(),truckTangent=new THREE.Vector3(),routePoint=new THREE.Vector3(),routeBefore=new THREE.Vector3(),routeAfter=new THREE.Vector3();
+      function routeCurvature(path,u){
+        const delta=.001;path.getTangentAt((u-delta+1)%1,routeBefore);path.getTangentAt((u+delta)%1,routeAfter);
+        return routeBefore.distanceTo(routeAfter)/(2*delta*path.getLength());
+      }
+      function updateLoading(time,h=fixedStep){
         let ownershipChanged=false;
-        ship.position.y=Math.sin(time*.43)*.10;ship.rotation.z=Math.sin(time*.31)*.0008;ship.rotation.x=Math.sin(time*.27)*.0003;ship.updateMatrixWorld(true);
+        const waterMean=(seaHeight(34,-90,time)+seaHeight(34,0,time)+seaHeight(34,90,time))/3;
+        ship.position.y=spring(shipHeave,waterMean*.6,.17,.95,h);
+        ship.rotation.z=spring(shipRoll,(seaHeight(52,0,time)-seaHeight(16,0,time))/36*.35,.14,.9,h);
+        ship.rotation.x=spring(shipPitch,(seaHeight(34,85,time)-seaHeight(34,-85,time))/170*.3,.12,.95,h);ship.updateMatrixWorld(true);
         craneLoads.forEach((load,i)=>{
-          const t=(time+i*12)%cycleDuration,slot=load.slot,z=slot.p[2];
+          const t=(time+i*48)%cycleDuration,returning=t>halfCycle,elapsed=returning?cycleDuration-t:t;
+          // A longer run for horizontal trolley travel keeps speed below 6 m/s.
+          const p=elapsed<24?elapsed*10/24:elapsed<49?elapsed-14:elapsed<77?35+(elapsed-49)*16/28:elapsed-26,slot=load.slot,z=slot.p[2];
           cargoPoint.set(...slot.p).applyMatrix4(ship.matrixWorld);
-          const pickup=cargoPoint.y+1.295+.325,drop=4.7+2.59+.325;
+          const pickup=cargoPoint.y+1.620,drop=7.565;
           let x=110,y=42,state='approach',owner='ship';
-          if(t<6)x=blend(110,cargoPoint.x,t/6);
-          else if(t<14){x=cargoPoint.x;y=blend(42,pickup,(t-6)/8);state='lower to ship';}
-          else if(t<16){x=cargoPoint.x;y=pickup;state='lock';}
-          else if(t<24){x=cargoPoint.x;y=blend(pickup,42,(t-16)/8);state='lift';owner='spreader';}
-          else if(t<35){x=blend(cargoPoint.x,110,(t-24)/11);state='transfer';owner='spreader';}
-          else if(t<44){y=blend(42,drop,(t-35)/9);state='lower to truck';owner='spreader';}
-          else if(t<46){y=drop;state='unlock';owner='truck';}
-          else if(t<53){y=blend(drop,42,(t-46)/7);state='hoist clear';owner='truck';}
-          else {state='truck delivery';owner=t<65?'truck':'yard';}
+          if(p<10)x=blend(110,cargoPoint.x,p/10);
+          else if(p<21){x=cargoPoint.x;y=blend(42,pickup,(p-10)/11);state='lower to ship';}
+          else if(p<23){x=cargoPoint.x;y=pickup;state='lock';}
+          else if(p<35){x=cargoPoint.x;y=blend(pickup,42,(p-23)/12);state='lift';owner='spreader';}
+          else if(p<51){x=blend(cargoPoint.x,110,(p-35)/16);state='transfer';owner='spreader';}
+          else if(p<56){state='settle';owner='spreader';}
+          else if(p<69){y=blend(42,drop,(p-56)/13);state='lower to truck';owner='spreader';}
+          else if(p<72){y=drop;state='unlock';owner='truck';}
+          else if(p<82){y=blend(drop,42,(p-72)/10);state='hoist clear';owner='truck';}
+          else{state='truck delivery';owner=p<106?'truck':p<137?'yard hoist':'yard';}
           const absent=owner!=='ship';if(slot.inTransit!==absent){slot.inTransit=absent;ownershipChanged=true;}
-          load.x=x;load.y=y;load.state=state;load.owner=owner;
-          const routeTime=t<53?0:(t-53)/23;
-          load.truck.copy(truckPaths[i].getPointAt(routeTime%1));truckTangent.copy(truckPaths[i].getTangentAt(routeTime%1));
-          load.heading=t<53?0:Math.atan2(truckTangent.x,truckTangent.z);
-          placeVehicle(trucks,i,load.truck,load.heading);
-          writeInstance(hoistTrolleys,i,[x,47,z],[5,1.2,8]);writeInstance(hoistSpreaders,i,[x,y,z],[3.2,.65,12.1]);
-          let n=i*4;for(const dx of [-1.2,1.2])for(const dz of [-4.7,4.7])writeInstance(hoistRopes,n++,[x+dx,(46+y+.325)/2,z+dz],[.055,46-y-.325,.055]);
+          const v=(x-load.previousX)/h,acc=load.initialized?(v-load.previousVelocity)/h:0;
+          const ropeLength=46-y,frequency=Math.sqrt(gravity/ropeLength);
+          load.swing.velocity+=(-gravity/ropeLength*load.swing.value-1.15*frequency*load.swing.velocity-THREE.MathUtils.clamp(acc,-3,3)/ropeLength)*h;
+          load.swing.value=THREE.MathUtils.clamp(load.swing.value+load.swing.velocity*h,-.09,.09);
+          const swayGate=THREE.MathUtils.smoothstep(p,23,35)*(1-THREE.MathUtils.smoothstep(p,51,67));
+          const angle=load.swing.value*swayGate,hangX=x+Math.sin(angle)*ropeLength,hangY=46-Math.cos(angle)*ropeLength;
+          load.sway=angle;load.previousX=x;load.previousVelocity=v;load.initialized=true;
+          load.x=x;load.y=hangY;load.state=returning?'return '+state:state;load.owner=owner;load.phase=p;
+          const travel=ease((p-82)/22),route=returning?truckPaths[i].inbound:truckPaths[i].outbound;
+          const routeU=returning?1-travel:travel,oldX=load.truck.x,oldZ=load.truck.z;
+          route.getPointAt(routeU,load.truck);route.getTangentAt(routeU,truckTangent);
+          load.heading=Math.atan2(truckTangent.x,truckTangent.z);
+          load.speed=Math.hypot(load.truck.x-oldX,load.truck.z-oldZ)/h;
+          if(!load.started){load.speed=0;load.started=true;}
+          load.wheelPhase+=load.speed*h/.7;
+          placeVehicle(trucks,i,load.truck,load.heading,load.wheelPhase);
+          writeInstance(hoistTrolleys,i,[x,47,z],[5,1.2,8]);writeInstance(hoistSpreaders,i,[hangX,hangY,z],[3.2,.65,12.1],[0,0,angle]);
+          writeInstance(movingCabins,i,[x+4,44.9,z+5],[3.4,3.2,3.1]);
+          writeInstance(movingCabinWindows,i*2,[x+4,45.2,z+6.57],[2.9,1.8,.07]);
+          writeInstance(movingCabinWindows,i*2+1,[x+2.27,45.2,z+5],[.07,1.8,2.7]);
+          let n=i*4;for(const dx of [-1.2,1.2])for(const dz of [-4.7,4.7])writeRope(hoistRopes,n++,[x+dx,46,z+dz],[hangX+dx*Math.cos(angle),hangY+dx*Math.sin(angle)+.325,z+dz],.055);
+          let yardX=142,yardY=7.565;
+          if(p>=106&&p<118)yardY=blend(7.565,14,(p-106)/12);
+          else if(p>=118&&p<128){yardX=blend(142,151,(p-118)/10);yardY=14;}
+          else if(p>=128){yardX=151;yardY=blend(14,6.015,(p-128)/9);}
+          // Empty yard hoist waits above the stationary receiving truck.
+          if(p<104)yardY=14;else if(p<106)yardY=blend(14,7.565,(p-104)/2);
+          writeInstance(yardSpreaders,i,[yardX,yardY,z],[3.2,.65,12.1]);writeInstance(yardTrolleys,i,[yardX,17,z],[3,.8,14]);
+          n=i*4;for(const dx of [-1.2,1.2])for(const dz of [-4.7,4.7])writeRope(yardHoistRopes,n++,[yardX+dx,16.6,z+dz],[yardX+dx,yardY+.325,z+dz],.04);
           load.mesh.visible=owner!=='ship';
-          if(owner==='spreader')writeInstance(load.mesh,0,[x,y-.325-1.295,z]);
-          else if(owner==='truck')writeInstance(load.mesh,0,[load.truck.x,5.995,load.truck.z],[1,1,1],[0,load.heading,0]);
-          else if(owner==='yard')writeInstance(load.mesh,0,[151,4.395,z]);
+          if(owner==='spreader')writeInstance(load.mesh,0,[hangX+Math.sin(angle)*1.620,hangY-Math.cos(angle)*1.620,z],[1,1,1],[0,0,angle]);
+          else if(owner==='truck')writeInstance(load.mesh,0,[load.truck.x,5.945,load.truck.z],[1,1,1],[0,load.heading,0]);
+          else if(owner==='yard hoist')writeInstance(load.mesh,0,[yardX,yardY-1.620,z],[1,1,1],[0,Math.PI,0]);
+          else if(owner==='yard')writeInstance(load.mesh,0,[151,4.395,z],[1,1,1],[0,Math.PI,0]);
           load.mesh.instanceMatrix.needsUpdate=true;load.mesh.computeBoundingSphere();
         });
-        // The scene is a repeating loading demonstration: delivered cargo resets at cycle end.
         if(ownershipChanged)lastDetailQuality=undefined;
-        for(const mesh of [hoistTrolleys,hoistSpreaders,hoistRopes]){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}
+        for(const mesh of [hoistTrolleys,hoistSpreaders,hoistRopes,movingCabins,movingCabinWindows,yardSpreaders,yardHoistRopes,yardTrolleys]){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}
         finishVehicles(trucks);
-        for(let i=0;i<3;i++){
-          const u=(time/150+i/3)%1,p=carrierPath.getPointAt(u),d=carrierPath.getTangentAt(u);
-          placeVehicle(carriers,i,p,Math.atan2(d.x,d.z));
-        }
-        finishVehicles(carriers);
+        carrierStates.forEach((state,i)=>{
+          const length=carrierPath.getLength(),u=(state.distance/length)%1;
+          const targetSpeed=Math.min(4.8,Math.sqrt(.5/Math.max(.002,routeCurvature(carrierPath,u))));
+          state.speed+=THREE.MathUtils.clamp(targetSpeed-state.speed,-.9*h,.6*h);state.distance+=state.speed*h;state.wheelPhase+=state.speed*h/.95;
+          const next=(state.distance/length)%1;carrierPath.getPointAt(next,routePoint);carrierPath.getTangentAt(next,truckTangent);
+          placeVehicle(carriers,i,routePoint,Math.atan2(truckTangent.x,truckTangent.z),state.wheelPhase);
+        });finishVehicles(carriers);
       }
 
-      // Procedural tug and pilot boat, with geometry generated from a simple hull outline.
       function makeBoat(name,length,beam,paint){
         const group=new THREE.Group();group.name=name;scene.add(group);
         const shape=new THREE.Shape();shape.moveTo(-beam/2,-length/2);shape.lineTo(beam/2,-length/2);
         shape.lineTo(beam/2,length*.22);shape.quadraticCurveTo(beam*.4,length*.43,0,length/2);
         shape.quadraticCurveTo(-beam*.4,length*.43,-beam/2,length*.22);shape.closePath();
-        const geo=new THREE.ExtrudeGeometry(shape,{depth:1.8,bevelEnabled:true,bevelThickness:.35,bevelSize:.25,bevelSegments:2,steps:1});
-        geo.rotateX(Math.PI/2);geo.translate(0,1.2,0);
+        const geo=new THREE.ExtrudeGeometry(shape,{depth:1.8,bevelEnabled:true,bevelThickness:.35,bevelSize:.25,bevelSegments:2,steps:1});geo.rotateX(Math.PI/2);geo.translate(0,1.2,0);
         const hull=new THREE.Mesh(geo,paint);hull.castShadow=true;group.add(hull);
-        box(beam*.7,2.2,length*.34,whiteSteel,0,2.3,0,group);
-        box(beam*.76,.25,length*.39,orange,0,3.55,0,group);
+        box(beam*.7,2.2,length*.34,whiteSteel,0,2.3,0,group);box(beam*.76,.25,length*.39,orange,0,3.55,0,group);
         instances(unitBox,glass,[{p:[0,2.7,length*.171],s:[beam*.6,1,.1]},{p:[-beam*.355,2.7,0],s:[.1,1,length*.25]},{p:[beam*.355,2.7,0],s:[.1,1,length*.25]}],false,group);
         instances(cylinders,whiteSteel,[{p:[0,4.4,-1],s:[.09,2,.09]}],true,group);
+        instances(new THREE.SphereGeometry(1,8,6),portNavigation,[{p:[-beam*.38,3.5,1],s:[.12,.15,.12]}],false,group);
+        instances(new THREE.SphereGeometry(1,8,6),starboardNavigation,[{p:[beam*.38,3.5,1],s:[.12,.15,.12]}],false,group);
+        const rails=[];
+        for(const x of [-beam*.4,beam*.4])for(const z of [-length*.38,length*.25])rails.push({p:[x,1.9,z],s:[.04,1.1,.04]});
+        for(const x of [-beam*.4,beam*.4])rails.push(rod([x,2.4,-length*.38],[x,2.4,length*.25],.04));
+        instances(cylinders,whiteSteel,rails,true,group);
         if(name==='Halvard Tug'){
           box(1,2,1,steel,1,3,-3,group);
           instances(new THREE.TorusGeometry(.7,.22,6,12),darkMat,[-1,1].flatMap(sign=>[-5,-2,2,4].map(z=>({p:[sign*beam*.52,.65,z],r:[0,Math.PI/2,0]}))),false,group);
@@ -913,41 +1076,90 @@
         return group;
       }
       const tug=makeBoat('Halvard Tug',17,6,steel),pilot=makeBoat('Halvard Pilot',12,3.8,orange);
-      const boatRoutes=[{boat:tug,cx:-173,rx:17,cz:-60,rz:230,period:190,offset:0},{boat:pilot,cx:-73,rx:28,cz:-45,rz:245,period:130,offset:1.8}];
-      function boatPose(route,time){const a=time/route.period*Math.PI*2+route.offset;return {x:route.cx+Math.sin(a)*route.rx,z:route.cz+Math.cos(a)*route.rz,heading:Math.atan2(Math.cos(a)*route.rx,-Math.sin(a)*route.rz)};}
+      function boatRoute(boat,points,maxSpeed,length,beam){
+        const path=new THREE.CatmullRomCurve3(points.map(([x,z])=>new THREE.Vector3(x,0,z)),true,'centripetal');
+        path.arcLengthDivisions=2048;path.updateArcLengths();
+        return {boat,path,maxSpeed,length,beam,distance:0,speed:0,heading:0,turnRate:0,heave:{value:0,velocity:0},pitch:{value:0,velocity:0},roll:{value:0,velocity:0},history:[],wakeAt:0,initialized:false};
+      }
+      const boatRoutes=[
+        boatRoute(tug,[[-170,160],[-143,160],[-120,90],[-125,-220],[-157,-265],[-185,-200]],4.5,17,6),
+        boatRoute(pilot,[[-80,250],[-45,225],[-42,140],[-55,-190],[-85,-300],[-110,-240],[-95,30]],6.8,12,3.8)
+      ];
       const foam=canvasTexture(128,128,(ctx,w,h)=>{
-        const g=ctx.createRadialGradient(64,64,5,64,64,63);g.addColorStop(0,'#ffffffc0');g.addColorStop(.45,'#e5f4ed70');g.addColorStop(1,'#e5f4ed00');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
-        ctx.globalCompositeOperation='destination-out';for(let i=0;i<300;i++){ctx.fillStyle='#00000060';ctx.fillRect(random()*w,random()*h,2,2);}
+        const g=ctx.createRadialGradient(64,64,0,64,64,63);g.addColorStop(0,'#eef4eab0');g.addColorStop(.35,'#e5f4ed48');g.addColorStop(1,'#e5f4ed00');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+        ctx.globalCompositeOperation='destination-out';for(let i=0;i<450;i++){ctx.fillStyle='#00000070';ctx.fillRect(random()*w,random()*h,1+random()*3,1+random()*4);}
       });
-      const foamMat=new THREE.MeshBasicMaterial({map:foam,transparent:true,depthWrite:false,opacity:.55,polygonOffset:true,polygonOffsetFactor:-1});
+      const foamMat=new THREE.MeshBasicMaterial({map:foam,transparent:true,depthWrite:false,opacity:.4,polygonOffset:true,polygonOffsetFactor:-1});
       foamMat.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <color_fragment>','#ifdef USE_COLOR\n diffuseColor.a *= vColor.r;\n#endif');};
-      const wakes=instances(new THREE.PlaneGeometry(1,1),foamMat,Array.from({length:240},()=>({p:[0,0,0]})),false);
-      const wakeTint=new THREE.Color();for(let i=0;i<240;i++)wakes.setColorAt(i,wakeTint);
-      function updateBoats(time){
-        boatRoutes.forEach((route,b)=>{
-          const p=boatPose(route,time);route.boat.position.set(p.x,Math.sin(time*1.2+b)*.12,p.z);route.boat.rotation.set(Math.sin(time*.8+b)*.015,p.heading,Math.sin(time*1.1+b)*.025);
-          for(let j=0;j<40;j++){
-            const age=(j+.5)*.28,old=boatPose(route,time-age),behind=b===0?9:6.5;
-            for(let side=-1;side<=1;side++){
-              const index=b*120+j*3+side+1,spread=side*(1+age*.6);
-              writeInstance(wakes,index,[old.x-Math.sin(old.heading)*behind+Math.cos(old.heading)*spread,.06+j*.0002,old.z-Math.cos(old.heading)*behind-Math.sin(old.heading)*spread],[1.5+age*.3,3+age*.25,1],[-Math.PI/2,0,-old.heading]);
-              wakes.setColorAt(index,wakeTint.setScalar((1-age/12)*(side===0?.6:1)));
-            }
+      const wakeCount=64,wakes=instances(new THREE.PlaneGeometry(1,1),foamMat,Array.from({length:wakeCount*6},()=>({p:[0,0,0]})),false);
+      const wakeTint=new THREE.Color();for(let i=0;i<wakeCount*6;i++)wakes.setColorAt(i,wakeTint);
+      const angleDifference=(a,b)=>Math.atan2(Math.sin(a-b),Math.cos(a-b));
+      function stepBoats(time,h){
+        boatRoutes.forEach(route=>{
+          const path=route.path,total=path.getLength(),u=(route.distance/total)%1;
+          const targetSpeed=Math.min(route.maxSpeed,Math.sqrt(.7/Math.max(.002,routeCurvature(path,u))));
+          route.speed+=THREE.MathUtils.clamp(targetSpeed-route.speed,-.65*h,.35*h);route.distance+=route.speed*h;
+          const next=(route.distance/total)%1;path.getPointAt(next,routePoint);path.getTangentAt(next,truckTangent);
+          const targetHeading=Math.atan2(truckTangent.x,truckTangent.z);
+          if(!route.initialized){route.heading=targetHeading;route.initialized=true;}
+          const error=angleDifference(targetHeading,route.heading);
+          route.turnRate+=(error*3-route.turnRate*2.8)*h;route.turnRate=THREE.MathUtils.clamp(route.turnRate,-.25,.25);route.heading+=route.turnRate*h;
+          const sx=Math.sin(route.heading),cz=Math.cos(route.heading),x=routePoint.x,z=routePoint.z;
+          const bow=seaHeight(x+sx*route.length*.36,z+cz*route.length*.36,time),stern=seaHeight(x-sx*route.length*.36,z-cz*route.length*.36,time);
+          const port=seaHeight(x-cz*route.beam*.4,z+sx*route.beam*.4,time),starboard=seaHeight(x+cz*route.beam*.4,z-sx*route.beam*.4,time);
+          route.boat.position.set(x,spring(route.heave,(bow+stern+port+starboard)*.25-.008*route.speed*route.speed,.7,.8,h),z);
+          const pitchTarget=(stern-bow)/(route.length*.72)-.0015*route.speed*route.speed;
+          const rollTarget=(starboard-port)/(route.beam*.8)-route.speed*route.turnRate/gravity*.35;
+          route.boat.rotation.set(spring(route.pitch,pitchTarget,.65,.8,h),route.heading,spring(route.roll,THREE.MathUtils.clamp(rollTarget,-.12,.12),.8,.85,h),'YXZ');
+          if(time-route.wakeAt>.14&&route.speed>.25){
+            route.history.unshift({x:x-sx*route.length*.46,z:z-cz*route.length*.46,heading:route.heading,time,speed:route.speed});
+            if(route.history.length>wakeCount)route.history.pop();route.wakeAt=time;
           }
         });
-        wakes.instanceMatrix.needsUpdate=true;wakes.instanceColor.needsUpdate=true;wakes.computeBoundingSphere();
       }
-      let simulationTime=0,lastShadowUpdate=-1;
+      function updateWakes(time){
+        boatRoutes.forEach((route,b)=>{
+          for(let j=0;j<wakeCount;j++)for(let side=-1;side<=1;side++){
+            const index=b*wakeCount*3+j*3+side+1,p=route.history[j],age=p?time-p.time:99;
+            if(!p||age>10){writeInstance(wakes,index,[0,-10,0],[0,0,0]);continue;}
+            const spread=side*(route.beam*.16+age*.45),x=p.x+Math.cos(p.heading)*spread,z=p.z-Math.sin(p.heading)*spread;
+            const alpha=(1-age/10)*(1-age/10)*Math.min(1,p.speed/3)*(side===0?.65:1);
+            writeInstance(wakes,index,[x,seaHeight(x,z,time)+.055,z],[1.1+age*.25,2.1+age*.4,1],[-Math.PI/2,0,-p.heading]);wakes.setColorAt(index,wakeTint.setScalar(alpha));
+          }
+        });wakes.instanceMatrix.needsUpdate=true;wakes.instanceColor.needsUpdate=true;wakes.computeBoundingSphere();
+      }
+      function updateMoorings(time){
+        mooringSpecs.forEach((spec,j)=>{
+          ropeA.copy(spec.local).applyMatrix4(ship.matrixWorld);ropeB.copy(spec.shore);
+          const distance=ropeA.distanceTo(ropeB),sag=Math.sqrt(Math.max(.1,spec.rest*spec.rest-distance*distance))*.22;
+          for(let k=0;k<20;k++){
+            const a=k/20,b=(k+1)/20;
+            const point=u=>[THREE.MathUtils.lerp(ropeA.x,ropeB.x,u),THREE.MathUtils.lerp(ropeA.y,ropeB.y,u)-Math.sin(Math.PI*u)*sag,THREE.MathUtils.lerp(ropeA.z,ropeB.z,u)];
+            const start=point(a),end=point(b);writeRope(mooringMesh,j*20+k,start,end,.11);
+            // writeRope uses scratch vectors; restore the endpoints for the next segment.
+            ropeA.copy(spec.local).applyMatrix4(ship.matrixWorld);ropeB.copy(spec.shore);
+          }
+        });mooringMesh.instanceMatrix.needsUpdate=true;mooringMesh.computeBoundingSphere();
+        buoyBodies.forEach(({mesh,transforms})=>{
+          transforms.forEach((t,i)=>{const [x,y,z]=t.p,height=seaHeight(x,z,time);writeInstance(mesh,i,[x,y+height,z],t.s,[(seaHeight(x,z-2,time)-seaHeight(x,z+2,time))/4,0,(seaHeight(x+2,z,time)-seaHeight(x-2,z,time))/4]);});
+          mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();
+        });
+      }
+      let simulationTime=0,lastShadowUpdate=-1,physicsAccumulator=0,physicsSteps=0;
       function updateSimulation(dt){
-        simulationTime+=dt;updateLoading(simulationTime);updateBoats(simulationTime);
-        lighthouseBeam.rotation.y=simulationTime*.24;
-        if(simulationTime-lastShadowUpdate>(quality==='high'?.25:.6)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
+        physicsAccumulator+=Math.min(dt,.25);
+        while(physicsAccumulator>=fixedStep){
+          simulationTime+=fixedStep;updateLoading(simulationTime,fixedStep);stepBoats(simulationTime,fixedStep);physicsAccumulator-=fixedStep;physicsSteps++;
+        }
+        updateWakes(simulationTime);updateMoorings(simulationTime);lighthouseBeam.rotation.y=simulationTime*.24;
+        if(simulationTime-lastShadowUpdate>(quality==='high'?.2:.6)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
       }
 
       const composer=new EffectComposer(renderer);
       composer.addPass(new RenderPass(scene,camera));
       const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.13,.5,1.25);
       composer.addPass(bloom);composer.addPass(new OutputPass());
+      const edgeAA=new ShaderPass(FXAAShader);composer.addPass(edgeAA);
       const qualitySelect=document.querySelector('#quality');
       let quality='high',water=waters.high;
       function resize(){
@@ -955,11 +1167,14 @@
         renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
         composer.setPixelRatio(ratio);composer.setSize(innerWidth,innerHeight);
         camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+        edgeAA.uniforms.resolution.value.set(1/(innerWidth*ratio),1/(innerHeight*ratio));
       }
       function setQuality(value){
         quality=value;qualitySelect.value=value;
         for(const [key,sea] of Object.entries(waters))sea.visible=key===value;
         water=waters[value];bloom.enabled=value==='high';
+        edgeAA.enabled=value==='low'||safeMode;
+        for(const target of [composer.renderTarget1,composer.renderTarget2]){const samples=value==='high'&&!safeMode?2:0;if(target.samples!==samples){target.samples=samples;target.dispose();}}
         const resolution=value==='high'?(safeMode?1024:2048):(safeMode?512:1024);
         sun.shadow.mapSize.set(resolution,resolution);
         if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}
@@ -973,8 +1188,16 @@
       const hemisphere=scene.children.find(o=>o.isHemisphereLight);
       const moonFill=new THREE.DirectionalLight(0x8faed4,0);moonFill.position.set(-300,500,200);scene.add(moonFill);
       sky.material.uniforms.nightBlend={value:0};
-      sky.material.fragmentShader='uniform float nightBlend;\n'+sky.material.fragmentShader;
+      sky.material.fragmentShader=`uniform float nightBlend;
+        float cloudHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+        float cloudNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(cloudHash(i),cloudHash(i+vec2(1,0)),f.x),mix(cloudHash(i+vec2(0,1)),cloudHash(i+vec2(1)),f.x),f.y);}
+        `+sky.material.fragmentShader;
       sky.material.fragmentShader=sky.material.fragmentShader.replace('#include <tonemapping_fragment>',`
+        vec3 skyDir=normalize(vWorldPosition);
+        vec2 cp=skyDir.xz/(max(skyDir.y,.03)+.3)*3.0;
+        float wisps=cloudNoise(cp)*.6+cloudNoise(cp*2.7)*.27+cloudNoise(cp*6.1)*.13;
+        float cloud=smoothstep(.54,.78,wisps)*smoothstep(.02,.25,skyDir.y)*.24;
+        gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(1.15,1.2,1.2),cloud);
         float horizon = pow(1.0-max(normalize(vWorldPosition).y,0.0),3.0);
         gl_FragColor.rgb=mix(gl_FragColor.rgb,vec3(.003,.006,.016)+vec3(.009,.013,.024)*horizon,nightBlend);
         #include <tonemapping_fragment>`);
@@ -1041,23 +1264,23 @@
         sky.material.uniforms.rayleigh.value=1.65+warmth*.8;
         sun.position.copy(sunDirection).multiplyScalar(750).add(sun.target.position);
         sun.color.copy(whiteSun).lerp(warmSun,warmth);
-        sun.intensity=3.1*daylight*Math.max(.08,Math.sin(altitude));
+        sun.intensity=3.5*daylight*Math.max(.08,Math.sin(altitude));
         // A cool ambient floor keeps the port explorable after sunset.
-        hemisphere.intensity=THREE.MathUtils.lerp(.5,1.3,daylight);
+        hemisphere.intensity=THREE.MathUtils.lerp(.5,1.1,daylight);
         moonFill.intensity=nightAmount*.55;
         hemisphere.color.set(0xddeff5).lerp(new THREE.Color(0x6689b5),nightAmount);
-        scene.environmentIntensity=THREE.MathUtils.lerp(.32,.65,daylight);
+        scene.environmentIntensity=THREE.MathUtils.lerp(.32,.8,daylight);
         scene.fog.color.copy(dayFog).lerp(twilightFog,warmth*.6).lerp(nightFog,nightAmount);
-        scene.fog.density=THREE.MathUtils.lerp(.00029,.0004,nightAmount);
-        renderer.toneMappingExposure=THREE.MathUtils.lerp(1.1,.85,daylight);
+        scene.fog.density=THREE.MathUtils.lerp(.00042,.0004,nightAmount);
+        renderer.toneMappingExposure=THREE.MathUtils.lerp(1.1,.8,daylight);
         glass.emissive.set(0xffc578);glass.emissiveIntensity=nightAmount*1.3;
         lampMaterial.emissiveIntensity=nightAmount*5;
-        poolMaterial.opacity=nightAmount*.45;starMaterial.opacity=nightAmount*.65;
+        poolMaterial.opacity=nightAmount*.45;starMaterial.opacity=nightAmount*.65;foamMat.opacity=THREE.MathUtils.lerp(.12,.4,daylight);
         bloom.strength=THREE.MathUtils.lerp(.13,.28,nightAmount);
         for(const sea of Object.values(waters)){
           sea.material.uniforms.sunDirection.value.copy(sunDirection);
           sea.material.uniforms.sunColor.value.copy(sun.color).multiplyScalar(daylight);
-          sea.material.uniforms.waterColor.value.set(0x146560).lerp(new THREE.Color(0x06101e),nightAmount);
+          sea.material.uniforms.waterColor.value.set(0x10575b).lerp(new THREE.Color(0x06101e),nightAmount);
         }
         updateNightLights();renderer.shadowMap.needsUpdate=true;
         document.body.classList.toggle('night',nightAmount>.5);
@@ -1065,7 +1288,7 @@
         document.querySelector('#time').value=timeOfDay;
         document.querySelector('#time-label').textContent=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')} · ${label}`;
         document.querySelector('#time').setAttribute('aria-valuetext',document.querySelector('#time-label').textContent);
-        document.querySelector('.weather').textContent=label+' / CALM SEA';
+        document.querySelector('.weather').textContent=label+' / SWELL 0.2 M';
         clearTimeout(environmentTimer);environmentTimer=setTimeout(refreshEnvironment,300);
         if(save)try{localStorage.setItem('aurora-time',timeOfDay);}catch{}
       }
@@ -1077,6 +1300,7 @@
       qualitySelect.addEventListener('change',()=>{setQuality(qualitySelect.value);updateNightLights();});
       // Phase 6 — cameras, accessible input and entirely synthesized harbour audio.
       let cameraMode='orbit',yaw=0,pitch=0,tourTime=0,tourBlend=0,looking=false;
+      const cameraVelocity=new THREE.Vector3(),desiredVelocity=new THREE.Vector3();let lastLookX=0,lastLookY=0;
       const pressed=new Set(),lookEuler=new THREE.Euler(0,0,0,'YXZ'),moveVector=new THREE.Vector3(),forwardVector=new THREE.Vector3(),rightVector=new THREE.Vector3();
       const tourStart=new THREE.Vector3(),tourStartLook=new THREE.Vector3(),tourPoint=new THREE.Vector3(),tourLook=new THREE.Vector3();
       const tourPath=new THREE.CatmullRomCurve3([[-150,65,250],[-90,65,60],[-100,68,-240],[180,95,-320],[380,75,140],[120,90,290],[-180,50,280]].map(p=>new THREE.Vector3(...p)),true,'centripetal');
@@ -1087,7 +1311,7 @@
         if(!['orbit','drone','walk','tour'].includes(mode))return;
         pressed.clear();looking=false;if(document.pointerLockElement===canvas)document.exitPointerLock();
         if(controls.enabled){controls.enableDamping=false;controls.update();controls.enableDamping=true;}
-        cameraMode=mode;cameraSelect.value=mode;controls.enabled=mode==='orbit';
+        cameraVelocity.set(0,0,0);cameraMode=mode;cameraSelect.value=mode;controls.enabled=mode==='orbit';
         if(mode==='walk'){camera.position.set(70,4.75,200);camera.lookAt(70,4.75,0);}
         if(mode==='orbit'){
           camera.getWorldDirection(forwardVector);controls.target.copy(camera.position).addScaledVector(forwardVector,80);controls.cursor.copy(controls.target);controls.update();
@@ -1112,14 +1336,16 @@
       document.addEventListener('pointerlockchange',()=>{pressed.clear();looking=document.pointerLockElement===canvas;});
       canvas.addEventListener('pointerdown',event=>{
         if(cameraMode!=='drone'&&cameraMode!=='walk')return;
-        looking=true;canvas.focus({preventScroll:true});
+        looking=true;lastLookX=event.clientX;lastLookY=event.clientY;canvas.focus({preventScroll:true});
         if(event.pointerType==='mouse'&&canvas.requestPointerLock){
           try{const request=canvas.requestPointerLock();request?.catch(()=>showNotice('Drag the scene to look around.'));}catch{showNotice('Drag the scene to look around.');}
         }else canvas.setPointerCapture(event.pointerId);
       });
       canvas.addEventListener('pointermove',event=>{
         if((cameraMode!=='drone'&&cameraMode!=='walk')||(!looking&&document.pointerLockElement!==canvas))return;
-        yaw-=event.movementX*.0025;pitch=THREE.MathUtils.clamp(pitch-event.movementY*.0025,-1.45,1.45);
+        const dx=document.pointerLockElement===canvas?event.movementX:event.clientX-lastLookX,dy=document.pointerLockElement===canvas?event.movementY:event.clientY-lastLookY;
+        lastLookX=event.clientX;lastLookY=event.clientY;
+        yaw-=dx*.0025;pitch=THREE.MathUtils.clamp(pitch-dy*.0025,-1.45,1.45);
       });
       canvas.addEventListener('pointerup',()=>{if(document.pointerLockElement!==canvas)looking=false;});
       canvas.addEventListener('pointercancel',()=>{looking=false;pressed.clear();});
@@ -1141,7 +1367,8 @@
         moveVector.addScaledVector(forwardVector,Number(has('KeyW','ArrowUp'))-Number(has('KeyS','ArrowDown')));
         moveVector.addScaledVector(rightVector,Number(has('KeyD','ArrowRight'))-Number(has('KeyA','ArrowLeft')));
         if(cameraMode==='drone')moveVector.y+=Number(has('KeyE'))-Number(has('KeyQ'));
-        if(moveVector.lengthSq()>0){moveVector.normalize();camera.position.addScaledVector(moveVector,dt*(cameraMode==='walk'?3.4:32)*(has('ShiftLeft','ShiftRight')?2.8:1));}
+        desiredVelocity.copy(moveVector);if(desiredVelocity.lengthSq()>0)desiredVelocity.normalize().multiplyScalar((cameraMode==='walk'?3.4:32)*(has('ShiftLeft','ShiftRight')?2.8:1));
+        cameraVelocity.lerp(desiredVelocity,1-Math.exp(-dt*(cameraMode==='walk'?12:5)));camera.position.addScaledVector(cameraVelocity,dt);
         if(cameraMode==='walk'){
           // The clear waterside footpath avoids water, crane legs, rail bogies and traffic lanes.
           camera.position.x=THREE.MathUtils.clamp(camera.position.x,68.5,71.5);camera.position.z=THREE.MathUtils.clamp(camera.position.z,-290,290);camera.position.y=4.75;
@@ -1178,9 +1405,9 @@
           const now=ctx.currentTime;
           if(now>sound.nextGull){synthTone(1300+random()*500,.65,.055,'sine',random()*1.6-.8,650+random()*400);sound.nextGull=now+5+random()*8;}
           if(now>sound.nextHorn){synthTone(73,3.7,.11,'triangle',-.35,70);synthTone(110,3.4,.045,'sine',-.35,105);sound.nextHorn=now+30+random()*25;}
-          const handling=craneLoads.some(load=>load.state==='truck delivery');
+          const handling=craneLoads.some(load=>load.state==='return truck delivery'&&load.speed>.1);
           if(handling&&now>sound.nextBeep){synthTone(870,.17,.04,'sine',.4);sound.nextBeep=now+1.2;}
-          const distance=Math.hypot(camera.position.x-85,camera.position.z),moving=craneLoads.some(load=>['lift','transfer','hoist clear'].includes(load.state));
+          const distance=Math.hypot(camera.position.x-85,camera.position.z),moving=craneLoads.some(load=>['lift','transfer','hoist clear'].includes(load.state.replace('return ','')));
           sound.motorGain.gain.setTargetAtTime(moving?.12/(1+distance/130):.015,now,.4);
         },250);
       }
@@ -1216,13 +1443,13 @@
       const clock=new THREE.Clock();let seaTime=0,frameCount=0;
       const metrics={phase:6,quality,frames:0,drawCalls:0,triangles:0,fps:0};let frameAverage=1/60;
       // Read-only inspection point for browser verification; not a runtime dependency.
-      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?(safeMode?512:1024):(safeMode?256:512),safeMode,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,cameraMode,audioMuted:sound.muted,audioState:sound.context?.state||'not started',audioVoices:sound.voices.size,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray()})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray()}))})});
+      Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?(safeMode?512:1024):(safeMode?256:512),safeMode,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,physicsSteps,fixedStep,waveHeight:seaHeight(0,0,simulationTime),cameraMode,audioMuted:sound.muted,audioState:sound.context?.state||'not started',audioVoices:sound.voices.size,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray(),sway:l.sway,speed:l.speed,phase:l.phase})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray(),speed:r.speed,roll:r.boat.rotation.z,pitch:r.boat.rotation.x,heading:r.heading,wakeSamples:r.history.length}))})});
       renderer.setAnimationLoop(()=>{
-        const elapsed=clock.getDelta(),dt=Math.min(elapsed,.05);
+        const elapsed=clock.getDelta(),dt=Math.min(elapsed,.1);
         if(elapsed>0){frameAverage=frameAverage*.95+elapsed*.05;metrics.fps=Math.round(1/frameAverage);}
         if(document.hidden)return;
         updateSimulation(dt);
-        seaTime+=dt*.38;water.material.uniforms.time.value=seaTime;
+        water.material.uniforms.time.value=simulationTime;
         updateCamera(dt);
         // Keep the camera above sea level and above the quay when zooming close.
         const overQuay=camera.position.x>59&&camera.position.x<241&&Math.abs(camera.position.z)<301;
