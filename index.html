@@ -39,7 +39,7 @@
     #loading { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; background: #d4e4e4; z-index: 5; transition: opacity .65s; padding: 32px; }
     #loading h2 { font-size: 30px; font-weight: 450; letter-spacing: -.04em; margin: 15px 0; }
     #loading p { font-size: 12px; line-height: 1.8; max-width: 420px; }
-    #loading.hidden { opacity: 0; pointer-events: none; }
+    #loading.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
     #status { position: fixed; top: 95px; right: 34px; max-width: 300px; font-size: 11px; background: #f2f5ecee; border-radius: 5px; padding: 10px 14px; display: none; }
     .night .masthead,.night .conditions {color:#dfebe5;}
     .night .mark {border-color:#c8dfd780;}
@@ -67,6 +67,12 @@
     .caption {max-width:400px;}.caption span {display:block;line-height:1.6;}
     #camera-mode {max-width:130px;}
     @media (max-width:650px) {.toolbar {flex-wrap:wrap;justify-content:center;gap:4px;}.toolbar .divider{display:none;} .caption{max-width:100%;}.caption strong{display:none;}#camera-mode{max-width:100px;} .toolbar label{font-size:8px;} .toolbar button{padding:0 6px;} #touch-move{bottom:220px;}}
+    @media (max-height:430px) and (orientation:landscape) {
+      .masthead {top:12px;left:16px;}
+      .conditions {display:none;}
+      .time-control {top:12px;right:16px;left:auto;transform:none;width:195px;}
+      #touch-move {bottom:96px;}
+    }
     @media (prefers-reduced-motion: reduce) { #loading { transition: none; } }
   </style>
   <script>
@@ -109,33 +115,63 @@
     // Coordinates are metres: +Y up; quay runs along Z, water is west (-X).
     const loading = document.querySelector('#loading');
     const loadingMessage = document.querySelector('#loading-message');
-    const mobileDevice=matchMedia('(pointer:coarse)').matches||innerWidth<650;
-    const safeMode=mobileDevice||new URLSearchParams(location.search).has('safe');
-    function fail(error) {
+    const query = new URLSearchParams(location.search);
+    const touchInput = matchMedia('(pointer:coarse)').matches;
+    const mobileDevice = touchInput || innerWidth < 650;
+    const compatibilityRequested = query.has('safe');
+    const safeMode = mobileDevice || compatibilityRequested;
+    const qualityKey = mobileDevice ? 'aurora-mobile-quality' : 'aurora-quality';
+    function fail(error, stage) {
       console.error(error);
+      delete document.body.dataset.ready;
       loading.classList.remove('hidden');
       loading.querySelector('h2').textContent = 'The harbour could not open.';
-      const detail=String(error?.message||error);
-      if(/fetch|import|module|network/i.test(detail)&&new URLSearchParams(location.search).get('cdn')!=='unpkg'){
+      if(stage === 'download' && query.get('cdn') !== 'unpkg'){
         loading.querySelector('h2').textContent='Trying another connection…';
         const url=new URL(location.href);url.searchParams.set('cdn','unpkg');location.replace(url.href);return;
       }
-      loadingMessage.textContent='Startup error: '+detail+'.';
+      loadingMessage.textContent = stage === 'download'
+        ? 'The 3D engine could not download. Check your connection and retry.'
+        : String(error?.message || error);
       if(!document.querySelector('#retry-harbour')){
         const retry=document.createElement('button');retry.id='retry-harbour';retry.textContent='Retry in compatibility mode';
-        retry.onclick=()=>{const url=new URL(location.href);url.searchParams.set('safe','1');url.searchParams.set('retry',Date.now());location.replace(url.href);};loading.append(retry);
+        retry.onclick=()=>{
+          const url = new URL(location.href);
+          url.searchParams.set('safe','1');
+          url.searchParams.set('retry',Date.now());
+          if(stage === 'download') url.searchParams.delete('cdn');
+          location.replace(url.href);
+        };
+        loading.append(retry);
       }
     }
-    try {
-      const [THREE, { OrbitControls }, { Water }, { Sky }, { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }, { ShaderPass }, { FXAAShader }] = await Promise.all([
+    async function loadEngine() {
+      const modules = Promise.all([
         import('three'), import('three/addons/controls/OrbitControls.js'),
         import('three/addons/objects/Water.js'), import('three/addons/objects/Sky.js'),
         import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
         import('three/addons/postprocessing/UnrealBloomPass.js'), import('three/addons/postprocessing/OutputPass.js'),
         import('three/addons/postprocessing/ShaderPass.js'), import('three/addons/shaders/FXAAShader.js')
       ]);
+      let timer;
+      const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('The 3D engine download timed out.')), 15000);
+      });
+      try { return await Promise.race([modules, deadline]); }
+      finally { clearTimeout(timer); }
+    }
+
+    let startupStage = 'download';
+    try {
+      const [THREE, { OrbitControls }, { Water }, { Sky }, { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }, { ShaderPass }, { FXAAShader }] = await loadEngine();
+      startupStage = 'render';
       const canvas = document.querySelector('#scene');
-      const renderer = new THREE.WebGLRenderer({ canvas, antialias: !safeMode, powerPreference: safeMode?'default':'high-performance' });
+      const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: safeMode ? 'default' : 'high-performance' });
+      if (!gl) throw new Error('WebGL 2 is unavailable. Open the harbour in a browser with hardware acceleration enabled.');
+      const renderer = new THREE.WebGLRenderer({ canvas, context: gl });
+      const supportsHDR = renderer.extensions.has('EXT_color_buffer_float') || renderer.extensions.has('EXT_color_buffer_half_float');
+      const canSampleHDR = supportsHDR && !safeMode &&
+        gl.getInternalformatParameter(gl.RENDERBUFFER, gl.RGBA16F, gl.SAMPLES)?.includes(2);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 0.85;
@@ -158,12 +194,36 @@
       controls.maxTargetRadius = 560;
       controls.screenSpacePanning = false;
       controls.listenToKeyEvents(canvas);
+
+      function fitShipInPortrait() {
+        // Fit the ship's berth envelope with margin for the bow and bridge.
+        const offset = camera.position.clone().sub(controls.target);
+        camera.lookAt(controls.target);
+        const inverseRotation = camera.quaternion.clone().invert();
+        const halfHeight = Math.tan(THREE.MathUtils.degToRad(camera.fov * .5));
+        const corner = new THREE.Vector3();
+        let distance = offset.length();
+        for (const x of [12, 56]) for (const y of [0, 45]) for (const z of [-153, 179]) {
+          corner.set(x, y, z).sub(controls.target).applyQuaternion(inverseRotation);
+          const fitX = Math.abs(corner.x) / (halfHeight * camera.aspect * .86);
+          const fitY = Math.abs(corner.y) / (halfHeight * .8);
+          distance = Math.max(distance, corner.z + Math.max(fitX, fitY));
+        }
+        camera.position.copy(controls.target).add(offset.setLength(distance));
+      }
+
       function resetView() {
         // Drain any orbit inertia before restoring a deterministic home pose.
         controls.enableDamping=false;controls.update();
-        camera.position.set(...(innerWidth/innerHeight<.8?[-355,205,430]:[-285,145,355]));
-        controls.target.set(65, 18, -12);
-        controls.cursor.set(65, 18, -12);
+        if (camera.aspect < .8) {
+          camera.position.set(-355, 205, 430);
+          controls.target.set(49, 19, 10);
+          fitShipInPortrait();
+        } else {
+          camera.position.set(-285, 145, 355);
+          controls.target.set(65, 18, -12);
+        }
+        controls.cursor.copy(controls.target);
         controls.update();
         controls.enableDamping=true;
       }
@@ -263,9 +323,10 @@
       scene.add(sky);
       const environmentScene = new THREE.Scene();
       const environmentSky = sky.clone(); environmentScene.add(environmentSky);
-      const pmrem = new THREE.PMREMGenerator(renderer);
-      let environment = pmrem.fromScene(environmentScene, .04, .1, 20000);
-      scene.environment=environment.texture; scene.environmentIntensity=.65;
+      const pmrem = supportsHDR ? new THREE.PMREMGenerator(renderer) : null;
+      let environment = pmrem?.fromScene(environmentScene, .04, .1, 20000);
+      if (environment) scene.environment = environment.texture;
+      scene.environmentIntensity = .65;
       // Reuse PMREM for debounced time-of-day environment updates.
       const sun = new THREE.DirectionalLight(0xfff3d9, 3.1);
       sun.position.copy(sunDirection).multiplyScalar(750);
@@ -725,16 +786,19 @@
       // Phase 3 — terminal infrastructure. Repeated steelwork shares instanced batches.
       const cranePaint=new THREE.MeshStandardMaterial({color:0x276567,metalness:.32,roughness:.52});
       const orange=new THREE.MeshStandardMaterial({color:0xd8a139,metalness:.35,roughness:.65});
-      const craneSteel=[],craneBraces=[],craneWheels=[],craneGlass=[],craneCables=[],spreaders=[];
+      const craneSteel=[],craneBraces=[],craneWheels=[],craneCables=[];
       const craneStations=[-88.2,-37,1.4,52.6,103.8];
       for(const z of craneStations){
         // Two rail bogies per portal; a clear truck lane beneath the gantry.
         for(const x of [75,96])for(const dz of [-9,9]){
           craneSteel.push({p:[x,4.7,z+dz],s:[3,2.4,7]});
-          craneBraces.push(rod([x,5,z+dz],[x+(x===75?2:-2),43,z+dz*.65],.75));
+          craneBraces.push(rod([x,5,z+dz],[x+(x===75?2:-2),53,z+dz*.92],.75));
           for(const d of [-2,2])craneWheels.push({p:[x,3.9,z+dz+d],s:[.75,2,.75],r:[0,0,Math.PI/2]});
         }
-        craneSteel.push({p:[85.5,26,z],s:[24,2,3]},{p:[85.5,44,z],s:[27,3,15]});
+        craneSteel.push({p:[85.5,26,z],s:[24,2,3]});
+        // Span above the trolley rails and tie the legs outside the cabin's path.
+        for(const x of [77,94])craneSteel.push({p:[x,53.75,z],s:[2.4,2,17.8]});
+        for(const dz of [-8.3,8.3])craneSteel.push({p:[85.5,44,z+dz],s:[19,1.7,1.35]});
         // Twin lattice boom trusses extend over every ship row.
         for(const dz of [-3.6,3.6]){
           for(const y of [48,52])craneSteel.push({p:[56,y,z+dz],s:[113,.55,.55]});
@@ -742,7 +806,7 @@
             craneBraces.push(rod([x,48,z+dz],[x+7,52,z+dz],.16));
             craneBraces.push(rod([x,52,z+dz],[x+7,48,z+dz],.16));
           }
-          craneBraces.push(rod([79,44,z+dz],[83,68,z+dz],.5));
+          craneBraces.push(rod([78,53,z+dz],[83,68,z+dz],.5));
           craneCables.push(rod([83,67,z+dz],[3,52,z+dz],.075),rod([83,67,z+dz],[111,52,z+dz],.075));
         }
         craneSteel.push({p:[83,68,z],s:[2,1,9]});
@@ -1155,34 +1219,46 @@
         if(simulationTime-lastShadowUpdate>(quality==='high'?.2:.6)){renderer.shadowMap.needsUpdate=true;lastShadowUpdate=simulationTime;}
       }
 
-      const composer=new EffectComposer(renderer);
+      // WebGL 2 does not guarantee that half-float framebuffers are renderable.
+      const sceneTarget = new THREE.WebGLRenderTarget(1, 1, {
+        type: supportsHDR ? THREE.HalfFloatType : THREE.UnsignedByteType
+      });
+      const composer=new EffectComposer(renderer, sceneTarget);
       composer.addPass(new RenderPass(scene,camera));
-      const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.13,.5,1.25);
-      composer.addPass(bloom);composer.addPass(new OutputPass());
+      const bloom = supportsHDR ? new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),.13,.5,1.25) : null;
+      if (bloom) composer.addPass(bloom);
+      composer.addPass(new OutputPass());
       const edgeAA=new ShaderPass(FXAAShader);composer.addPass(edgeAA);
       const qualitySelect=document.querySelector('#quality');
-      let quality='high',water=waters.high;
+      let quality='high',water=waters.high,reflectionRevision=0;
       function resize(){
         const ratio=Math.min(devicePixelRatio,quality==='high'&&!safeMode?1.5:1);
         renderer.setPixelRatio(ratio);renderer.setSize(innerWidth,innerHeight);
         composer.setPixelRatio(ratio);composer.setSize(innerWidth,innerHeight);
         camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
         edgeAA.uniforms.resolution.value.set(1/(innerWidth*ratio),1/(innerHeight*ratio));
+        reflectionRevision++;
       }
-      function setQuality(value){
+      function setQuality(value, save=false){
         quality=value;qualitySelect.value=value;
         for(const [key,sea] of Object.entries(waters))sea.visible=key===value;
-        water=waters[value];bloom.enabled=value==='high';
-        edgeAA.enabled=value==='low'||safeMode;
-        for(const target of [composer.renderTarget1,composer.renderTarget2]){const samples=value==='high'&&!safeMode?2:0;if(target.samples!==samples){target.samples=samples;target.dispose();}}
+        water=waters[value];
+        if (bloom) bloom.enabled=value==='high';
+        const samples=value==='high'&&canSampleHDR?2:0;
+        edgeAA.enabled=samples===0;
+        for(const target of [composer.renderTarget1,composer.renderTarget2]){
+          if(target.samples!==samples){target.samples=samples;target.dispose();}
+        }
         const resolution=value==='high'?(safeMode?1024:2048):(safeMode?512:1024);
         sun.shadow.mapSize.set(resolution,resolution);
         if(sun.shadow.map){sun.shadow.map.dispose();sun.shadow.map=null;}
         renderer.shadowMap.needsUpdate=true;resize();
-        try{localStorage.setItem('aurora-quality',value);}catch{}
+        if(save) try{localStorage.setItem(qualityKey,value);}catch{}
       }
-      let savedQuality;try{savedQuality=localStorage.getItem('aurora-quality');}catch{}
-      setQuality(safeMode?'low':savedQuality==='low'?'low':'high');
+      let savedQuality;try{savedQuality=localStorage.getItem(qualityKey);}catch{}
+      const defaultQuality = safeMode || !supportsHDR ? 'low' : 'high';
+      const preferredQuality = ['low','high'].includes(savedQuality) ? savedQuality : defaultQuality;
+      setQuality(compatibilityRequested ? 'low' : preferredQuality);
       // Phase 5 — continuous solar time. No external sky, star or lighting textures.
       let timeOfDay=12,nightAmount=0,environmentTimer;
       const hemisphere=scene.children.find(o=>o.isHemisphereLight);
@@ -1244,6 +1320,7 @@
       function refreshEnvironment(){
         const next=pmrem.fromScene(environmentScene,.04,.1,20000);
         const previous=environment;environment=next;scene.environment=next.texture;previous.dispose();
+        reflectionRevision++;
       }
       function updateNightLights(){
         floodLights.forEach((light,i)=>{light.intensity=nightAmount*(i<3||quality==='high'?15000:0);light.visible=light.intensity>0;});
@@ -1276,20 +1353,24 @@
         glass.emissive.set(0xffc578);glass.emissiveIntensity=nightAmount*1.3;
         lampMaterial.emissiveIntensity=nightAmount*5;
         poolMaterial.opacity=nightAmount*.45;starMaterial.opacity=nightAmount*.65;foamMat.opacity=THREE.MathUtils.lerp(.12,.4,daylight);
-        bloom.strength=THREE.MathUtils.lerp(.13,.28,nightAmount);
+        if (bloom) bloom.strength=THREE.MathUtils.lerp(.13,.28,nightAmount);
         for(const sea of Object.values(waters)){
           sea.material.uniforms.sunDirection.value.copy(sunDirection);
           sea.material.uniforms.sunColor.value.copy(sun.color).multiplyScalar(daylight);
           sea.material.uniforms.waterColor.value.set(0x10575b).lerp(new THREE.Color(0x06101e),nightAmount);
         }
         updateNightLights();renderer.shadowMap.needsUpdate=true;
+        reflectionRevision++;
         document.body.classList.toggle('night',nightAmount>.5);
         const minutes=Math.round(timeOfDay*60),label=nightAmount>.8?'NIGHT':timeOfDay<8?'DAWN':timeOfDay>16?'SUNSET':'DAYLIGHT';
         document.querySelector('#time').value=timeOfDay;
         document.querySelector('#time-label').textContent=`${String(Math.floor(minutes/60)).padStart(2,'0')}:${String(minutes%60).padStart(2,'0')} · ${label}`;
         document.querySelector('#time').setAttribute('aria-valuetext',document.querySelector('#time-label').textContent);
         document.querySelector('.weather').textContent=label+' / SWELL 0.2 M';
-        clearTimeout(environmentTimer);environmentTimer=setTimeout(refreshEnvironment,300);
+        if (pmrem) {
+          clearTimeout(environmentTimer);
+          environmentTimer=setTimeout(refreshEnvironment,300);
+        }
         if(save)try{localStorage.setItem('aurora-time',timeOfDay);}catch{}
       }
       document.querySelector('#time').addEventListener('input',event=>setTimeOfDay(event.target.value));
@@ -1297,19 +1378,31 @@
       let savedTime=12;try{const value=localStorage.getItem('aurora-time');if(value!==null&&Number.isFinite(Number(value)))savedTime=Number(value);}catch{}
       setTimeOfDay(savedTime,false);
 
-      qualitySelect.addEventListener('change',()=>{setQuality(qualitySelect.value);updateNightLights();});
+      qualitySelect.addEventListener('change',()=>{setQuality(qualitySelect.value,true);updateNightLights();});
       // Phase 6 — cameras, accessible input and entirely synthesized harbour audio.
-      let cameraMode='orbit',yaw=0,pitch=0,tourTime=0,tourBlend=0,looking=false;
-      const cameraVelocity=new THREE.Vector3(),desiredVelocity=new THREE.Vector3();let lastLookX=0,lastLookY=0;
+      let cameraMode='orbit',yaw=0,pitch=0,tourTime=0,tourBlend=0;
+      const cameraVelocity=new THREE.Vector3(),desiredVelocity=new THREE.Vector3();
+      let lookPointer=null,lastLookX=0,lastLookY=0;
       const pressed=new Set(),lookEuler=new THREE.Euler(0,0,0,'YXZ'),moveVector=new THREE.Vector3(),forwardVector=new THREE.Vector3(),rightVector=new THREE.Vector3();
       const tourStart=new THREE.Vector3(),tourStartLook=new THREE.Vector3(),tourPoint=new THREE.Vector3(),tourLook=new THREE.Vector3();
       const tourPath=new THREE.CatmullRomCurve3([[-150,65,250],[-90,65,60],[-100,68,-240],[180,95,-320],[380,75,140],[120,90,290],[-180,50,280]].map(p=>new THREE.Vector3(...p)),true,'centripetal');
       const tourTargets=new THREE.CatmullRomCurve3([[34,18,60],[60,35,-40],[160,12,-140],[240,12,-100],[333,7,128],[60,30,65],[-220,16,196]].map(p=>new THREE.Vector3(...p)),true,'centripetal');
       const cameraSelect=document.querySelector('#camera-mode'),cameraHelp=document.querySelector('#camera-help');
+      const cameraHints = {
+        orbit: touchInput ? 'Drag to orbit · Pinch to zoom · Two fingers to pan' : 'Drag to orbit · Scroll to zoom · Right-drag to pan',
+        drone: touchInput ? 'Drag to look · Hold the arrows to fly · Use + and − to change height' : 'WASD to fly · Q/E down/up · Shift faster · Click or drag to look · Esc releases mouse',
+        walk: touchInput ? 'Drag to look · Hold the arrows to walk along the quay' : 'WASD along the quay · Shift faster · Click or drag to look · Esc releases mouse',
+        tour: 'A three-minute harbour tour · Select another camera to take control'
+      };
+      function updateCameraHint() {
+        cameraHelp.textContent = cameraHints[cameraMode];
+        canvas.setAttribute('aria-label', 'Interactive 3D Halvard harbour. ' + cameraHints[cameraMode]);
+      }
+      updateCameraHint();
       function showNotice(message){const el=document.querySelector('#status');el.textContent=message;el.style.display='block';clearTimeout(showNotice.timer);showNotice.timer=setTimeout(()=>el.style.display='none',5000);}
       function setCameraMode(mode){
         if(!['orbit','drone','walk','tour'].includes(mode))return;
-        pressed.clear();looking=false;if(document.pointerLockElement===canvas)document.exitPointerLock();
+        pressed.clear();lookPointer=null;if(document.pointerLockElement===canvas)document.exitPointerLock();
         if(controls.enabled){controls.enableDamping=false;controls.update();controls.enableDamping=true;}
         cameraVelocity.set(0,0,0);cameraMode=mode;cameraSelect.value=mode;controls.enabled=mode==='orbit';
         if(mode==='walk'){camera.position.set(70,4.75,200);camera.lookAt(70,4.75,0);}
@@ -1322,8 +1415,7 @@
         lookEuler.setFromQuaternion(camera.quaternion,'YXZ');yaw=lookEuler.y;pitch=lookEuler.x;
         document.querySelector('#touch-move').hidden=mode!=='walk'&&mode!=='drone';
         document.querySelectorAll('[data-vertical]').forEach(el=>el.hidden=mode!=='drone');
-        const help={orbit:'Drag to orbit · Scroll to zoom · Right-drag to pan',drone:'WASD to fly · Q/E down/up · Shift faster · Click or drag to look · Esc releases mouse',walk:'WASD along the quay · Shift faster · Click or drag to look · Esc releases mouse',tour:'A three-minute harbour tour · Select another camera to take control'};
-        cameraHelp.textContent=help[mode];canvas.setAttribute('aria-label',help[mode]);canvas.focus({preventScroll:true});
+        updateCameraHint();canvas.focus({preventScroll:true});
       }
       cameraSelect.addEventListener('change',()=>setCameraMode(cameraSelect.value));
       function editable(target){return target instanceof Element&&!!target.closest('input,select,textarea,[contenteditable=true]');}
@@ -1332,23 +1424,29 @@
         if(['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code)){pressed.add(event.code);event.preventDefault();}
       });
       window.addEventListener('keyup',event=>pressed.delete(event.code));
-      window.addEventListener('blur',()=>{pressed.clear();looking=false;});
-      document.addEventListener('pointerlockchange',()=>{pressed.clear();looking=document.pointerLockElement===canvas;});
+      window.addEventListener('blur',()=>{pressed.clear();lookPointer=null;});
+      document.addEventListener('pointerlockchange',()=>{pressed.clear();lookPointer=null;});
       canvas.addEventListener('pointerdown',event=>{
         if(cameraMode!=='drone'&&cameraMode!=='walk')return;
-        looking=true;lastLookX=event.clientX;lastLookY=event.clientY;canvas.focus({preventScroll:true});
+        if(event.button!==0||lookPointer!==null||document.pointerLockElement===canvas)return;
+        lookPointer=event.pointerId;lastLookX=event.clientX;lastLookY=event.clientY;
+        canvas.setPointerCapture(event.pointerId);
+        canvas.focus({preventScroll:true});
         if(event.pointerType==='mouse'&&canvas.requestPointerLock){
           try{const request=canvas.requestPointerLock();request?.catch(()=>showNotice('Drag the scene to look around.'));}catch{showNotice('Drag the scene to look around.');}
-        }else canvas.setPointerCapture(event.pointerId);
+        }
       });
       canvas.addEventListener('pointermove',event=>{
-        if((cameraMode!=='drone'&&cameraMode!=='walk')||(!looking&&document.pointerLockElement!==canvas))return;
-        const dx=document.pointerLockElement===canvas?event.movementX:event.clientX-lastLookX,dy=document.pointerLockElement===canvas?event.movementY:event.clientY-lastLookY;
+        if(cameraMode!=='drone'&&cameraMode!=='walk')return;
+        const locked=document.pointerLockElement===canvas;
+        if(locked ? event.pointerType!=='mouse' : event.pointerId!==lookPointer)return;
+        const dx=locked?event.movementX:event.clientX-lastLookX,dy=locked?event.movementY:event.clientY-lastLookY;
         lastLookX=event.clientX;lastLookY=event.clientY;
         yaw-=dx*.0025;pitch=THREE.MathUtils.clamp(pitch-dy*.0025,-1.45,1.45);
       });
-      canvas.addEventListener('pointerup',()=>{if(document.pointerLockElement!==canvas)looking=false;});
-      canvas.addEventListener('pointercancel',()=>{looking=false;pressed.clear();});
+      for(const type of ['pointerup','pointercancel','lostpointercapture']){
+        canvas.addEventListener(type,event=>{if(event.pointerId===lookPointer)lookPointer=null;});
+      }
       document.querySelectorAll('[data-move]').forEach(button=>{
         button.addEventListener('pointerdown',event=>{pressed.add(button.dataset.move);button.setPointerCapture(event.pointerId);event.preventDefault();});
         for(const type of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(type,()=>pressed.delete(button.dataset.move));
@@ -1421,14 +1519,25 @@
       }
       document.querySelector('#sound').addEventListener('click',()=>setMuted(!sound.muted).catch(()=>{sound.muted=true;showNotice('Audio could not start. Try the sound button again in a supported browser.');}));
       document.addEventListener('visibilitychange',()=>{
-        pressed.clear();looking=false;
+        pressed.clear();lookPointer=null;
         if(sound.context){if(document.hidden)sound.context.suspend();else if(!sound.muted)sound.context.resume().catch(()=>{});}
       });
       // Static mesh transforms are baked once. Moving groups and instance matrices remain live.
       scene.traverse(object=>{if(object.isMesh){object.updateMatrix();object.matrixAutoUpdate=false;}});
       for(const sea of Object.values(waters)){
-        const reflect=sea.onBeforeRender;let reflected=false;
-        sea.onBeforeRender=function(...args){if(quality==='low'&&reflected&&frameCount%2===1)return;reflect.apply(this,args);reflected=true;};
+        const reflect=sea.onBeforeRender;
+        const lastView=new THREE.Matrix4(),lastProjection=new THREE.Matrix4();
+        let reflectedRevision=-1;
+        sea.onBeforeRender=function(activeRenderer,activeScene,viewCamera){
+          // Skip alternate frames only while both the camera and lighting are steady.
+          const unchanged=reflectedRevision===reflectionRevision &&
+            lastView.equals(viewCamera.matrixWorld) && lastProjection.equals(viewCamera.projectionMatrix);
+          if(quality==='low'&&unchanged&&frameCount%2===1)return;
+          reflect.call(this,activeRenderer,activeScene,viewCamera);
+          lastView.copy(viewCamera.matrixWorld);
+          lastProjection.copy(viewCamera.projectionMatrix);
+          reflectedRevision=reflectionRevision;
+        };
       }
 
       document.querySelector('#reset').addEventListener('click',()=>{setCameraMode('orbit');resetView();});
@@ -1438,13 +1547,27 @@
       });
       document.addEventListener('fullscreenchange',()=>document.querySelector('#fullscreen').setAttribute('aria-label',document.fullscreenElement?'Exit fullscreen':'Enter fullscreen'));
       window.addEventListener('resize',resize);
-      canvas.addEventListener('webglcontextlost',event=>{event.preventDefault();renderer.setAnimationLoop(null);fail(new Error('WebGL context lost'));});
+      canvas.addEventListener('webglcontextlost',event=>{
+        event.preventDefault();
+        renderer.setAnimationLoop(null);
+        clearTimeout(environmentTimer);
+        fail(new Error('The graphics connection was interrupted. Retry in compatibility mode.'));
+      });
       canvas.addEventListener('webglcontextrestored',()=>location.reload());
-      const clock=new THREE.Clock();let seaTime=0,frameCount=0;
+      const clock=new THREE.Clock();let frameCount=0;
       const metrics={phase:6,quality,frames:0,drawCalls:0,triangles:0,fps:0};let frameAverage=1/60;
       // Read-only inspection point for browser verification; not a runtime dependency.
       Object.defineProperty(window,'harbourDiagnostics',{get:()=>({...metrics,camera:camera.position.toArray(),target:controls.target.toArray(),reflectionSize:quality==='high'?(safeMode?512:1024):(safeMode?256:512),safeMode,instancedMeshes:(()=>{let count=0;scene.traverse(x=>{if(x.isInstancedMesh)count++;});return count;})(),containerCount:containerSlots.length,containerBatches:containerBatches.length+containerDetailBatches.length,detailedContainers:containerDetailBatches.reduce((n,m)=>n+m.count,0),containerDetail,shipName:ship.name,quayCranes:craneStations.length,yardContainers:yardContainerCount,simulationTime,physicsSteps,fixedStep,waveHeight:seaHeight(0,0,simulationTime),cameraMode,audioMuted:sound.muted,audioState:sound.context?.state||'not started',audioVoices:sound.voices.size,timeOfDay,nightAmount,activeFloodlights:floodLights.filter(l=>l.intensity>0).length,beaconIntensity:beacon.intensity,windowEmission:glass.emissiveIntensity,craneCycles:craneLoads.map(l=>({state:l.state,owner:l.owner,x:l.x,y:l.y,truck:l.truck.toArray(),sway:l.sway,speed:l.speed,phase:l.phase})),boats:boatRoutes.map(r=>({name:r.boat.name,position:r.boat.position.toArray(),speed:r.speed,roll:r.boat.rotation.z,pitch:r.boat.rotation.x,heading:r.heading,wakeSamples:r.history.length}))})});
-      renderer.setAnimationLoop(()=>{
+      function renderFrame(){
+        try {
+          renderNextFrame();
+        } catch(error) {
+          renderer.setAnimationLoop(null);
+          clearTimeout(environmentTimer);
+          fail(error);
+        }
+      }
+      function renderNextFrame(){
         const elapsed=clock.getDelta(),dt=Math.min(elapsed,.1);
         if(elapsed>0){frameAverage=frameAverage*.95+elapsed*.05;metrics.fps=Math.round(1/frameAverage);}
         if(document.hidden)return;
@@ -1460,8 +1583,11 @@
         frameCount++;metrics.frames=frameCount;metrics.quality=quality;
         metrics.drawCalls=renderer.info.render.calls;metrics.triangles=renderer.info.render.triangles;
         if(frameCount===2){loading.classList.add('hidden');document.body.dataset.ready='true';}
-      });
-    } catch(error) { fail(error); }
+      }
+      // Give moving objects valid transforms before the first rendered frame.
+      updateSimulation(fixedStep);
+      renderer.setAnimationLoop(renderFrame);
+    } catch(error) { fail(error, startupStage); }
   </script>
 </body>
 </html>
